@@ -1,22 +1,10 @@
 package com.ocarina.music.ui
 
-import android.annotation.SuppressLint
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.net.Uri
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebChromeClient
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -39,6 +27,9 @@ import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -56,15 +47,16 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.ocarina.music.data.FavoritesStore
 import com.ocarina.music.data.Song
 import com.ocarina.music.data.YouTubeMusicSearch
+import com.ocarina.music.playback.PlaybackConnector
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import java.util.Locale
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 
 private enum class Tab { DISCOVER, SEARCH, LIBRARY }
 
@@ -80,7 +72,26 @@ fun OcarinaApp() = OcarinaTheme {
     var isLoading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reloadIndex by remember { mutableIntStateOf(0) }
-    var playerSong by remember { mutableStateOf<Song?>(null) }
+    val playback = remember { PlaybackConnector(context) }
+    DisposableEffect(playback) { onDispose { playback.close() } }
+    var showFullPlayer by remember { mutableStateOf(false) }
+    var playQueue by remember { mutableStateOf<List<Song>>(emptyList()) }
+    fun playSong(song: Song) {
+        val source = if (tab == Tab.LIBRARY) favorites.toList() else songs
+        playQueue = source.ifEmpty { listOf(song) }
+        playback.play(song)
+        showFullPlayer = true
+    }
+    fun nextSong() {
+        val currentId = playback.currentSong?.videoId
+        val idx = playQueue.indexOfFirst { it.videoId == currentId }
+        playQueue.getOrNull(idx + 1)?.let { playback.play(it) }
+    }
+    fun previousSong() {
+        val currentId = playback.currentSong?.videoId
+        val idx = playQueue.indexOfFirst { it.videoId == currentId }
+        playQueue.getOrNull(idx - 1)?.let { playback.play(it) }
+    }
     var showInfo by remember { mutableStateOf(false) }
 
     fun toggleFavorite(song: Song) {
@@ -139,6 +150,10 @@ fun OcarinaApp() = OcarinaTheme {
             }
         },
         bottomBar = {
+            Column {
+                playback.currentSong?.let { playingSong ->
+                    MiniPlayer(playingSong, playback, onExpand = { showFullPlayer = true }, onNext = ::nextSong)
+                }
             NavigationBar(containerColor = Card, tonalElevation = 0.dp) {
                 listOf(
                     Triple(Tab.DISCOVER, "Descobrir", Icons.Rounded.Explore),
@@ -161,6 +176,7 @@ fun OcarinaApp() = OcarinaTheme {
                     )
                 }
             }
+            }
         },
     ) { padding ->
         AnimatedContent(
@@ -176,7 +192,7 @@ fun OcarinaApp() = OcarinaTheme {
                     isLoading = isLoading,
                     error = error,
                     onRetry = { reloadIndex++ },
-                    onOpen = { playerSong = it },
+                    onOpen = ::playSong,
                     onToggle = ::toggleFavorite,
                     onSearchClick = { tab = Tab.SEARCH },
                 )
@@ -188,12 +204,12 @@ fun OcarinaApp() = OcarinaTheme {
                     isLoading = isLoading,
                     error = error,
                     onRetry = { reloadIndex++ },
-                    onOpen = { playerSong = it },
+                    onOpen = ::playSong,
                     onToggle = ::toggleFavorite,
                 )
                 Tab.LIBRARY -> LibraryPage(
                     favorites = favorites,
-                    onOpen = { playerSong = it },
+                    onOpen = ::playSong,
                     onToggle = ::toggleFavorite,
                     onExplore = { tab = Tab.SEARCH },
                 )
@@ -201,36 +217,29 @@ fun OcarinaApp() = OcarinaTheme {
         }
     }
 
-    playerSong?.let { selected ->
-        PlayerDialog(song = selected, isFavorite = favorites.any { it.videoId == selected.videoId },
-            onFavorite = { toggleFavorite(selected) }, onClose = { playerSong = null })
+    if (showFullPlayer && playback.currentSong != null) {
+        NativePlayerScreen(
+            playback = playback,
+            isFavorite = favorites.any { it.videoId == playback.currentSong?.videoId },
+            onFavorite = { playback.currentSong?.let(::toggleFavorite) },
+            onClose = { showFullPlayer = false },
+            onNext = ::nextSong,
+            onPrevious = ::previousSong,
+        )
     }
     if (showInfo) {
         AlertDialog(
             onDismissRequest = { showInfo = false },
-            title = { Text("Sobre o ocarina music") },
-            text = {
-                Text(
-                    "Versão 0.1.3 • experimental. Busca pelo catálogo não oficial do YouTube Music e reprodução " +
-                        "pelo player incorporado do YouTube. Os favoritos ficam apenas neste dispositivo. " +
-                        "Não somos afiliados ao Google ou ao Spotify."
-                )
-            },
+            title = { Text("Sobre o Ocarina Music") },
+            text = { Text(
+                "Versão 0.2.0 · Player nativo de áudio (Media3). Catálogo e fonte musical experimentais " +
+                    "via YouTube Music / NewPipe. Algumas músicas podem não funcionar. " +
+                    "Favoritos são armazenados no dispositivo. Ocarina não é afiliado ao YouTube ou Spotify."
+            ) },
             confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Entendi") } },
-            dismissButton = {
-                TextButton(onClick = {
-                    showInfo = false
-                    // Public YouTube test video; checks embedded playback independently of music search.
-                    playerSong = Song(
-                        videoId = "jNQXAC9IVRw",
-                        title = "Vídeo de teste do player",
-                        artist = "Teste de conexão com o YouTube",
-                        artwork = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg"
-                    )
-                }) { Text("Testar reprodução") }
-            },
         )
     }
+
 }
 
 @Composable
@@ -474,132 +483,119 @@ private fun ErrorState(message: String, onRetry: () -> Unit) {
     }
 }
 
-@SuppressLint("SetJavaScriptEnabled")
+
+/** Barra compacta de áudio, sempre visível acima da navegação como no Spotify. */
 @Composable
-private fun PlayerDialog(song: Song, isFavorite: Boolean, onFavorite: () -> Unit, onClose: () -> Unit) {
-    val context = LocalContext.current
-    var loading by remember(song.videoId) { mutableStateOf(true) }
-    var playerError by remember(song.videoId) { mutableStateOf<String?>(null) }
-    var externalError by remember(song.videoId) { mutableStateOf<String?>(null) }
-
-    fun openYouTube() {
-        val safeId = song.videoId.takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) } ?: return
-        try {
-            context.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$safeId"))
-                    .addCategory(Intent.CATEGORY_BROWSABLE)
-            )
-            externalError = null
-        } catch (_: ActivityNotFoundException) {
-            externalError = "Não foi encontrado um navegador ou app do YouTube neste aparelho."
-        } catch (_: SecurityException) {
-            externalError = "O Android não permitiu abrir o link."
+private fun MiniPlayer(song: Song, playback: PlaybackConnector, onExpand: () -> Unit, onNext: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp)
+            .clip(RoundedCornerShape(15.dp)).background(Raised)
+            .clickable(onClick = onExpand).padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(model = song.artwork, contentDescription = null, contentScale = ContentScale.Crop,
+            modifier = Modifier.size(45.dp).clip(RoundedCornerShape(9.dp)))
+        Spacer(Modifier.width(11.dp))
+        Column(Modifier.weight(1f)) {
+            Text(song.title, color = WarmWhite, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+            Text(if (playback.resolvingAudio) "Preparando áudio…" else song.artist, color = Muted, fontSize = 11.sp, maxLines = 1)
         }
+        IconButton(onClick = { playback.toggle() }, enabled = !playback.resolvingAudio) {
+            if (playback.resolvingAudio || playback.buffering) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Lime)
+            } else Icon(if (playback.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, "Play/Pause", tint = WarmWhite)
+        }
+        IconButton(onClick = onNext) { Icon(Icons.Rounded.SkipNext, "Próxima", tint = WarmWhite) }
     }
+    if (playback.error != null) {
+        Text(playback.error.orEmpty(), modifier = Modifier.padding(horizontal = 16.dp, vertical = 3.dp), color = Color(0xFFF6AB9D), fontSize = 11.sp, maxLines = 2)
+    }
+}
 
+@Composable
+private fun NativePlayerScreen(
+    playback: PlaybackConnector, isFavorite: Boolean, onFavorite: () -> Unit,
+    onClose: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit,
+) {
+    val song = playback.currentSong ?: return
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                .clip(RoundedCornerShape(28.dp)).background(Card).padding(16.dp)
-                .animateContentSize(),
+            Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF344737), Ink, Ink)))
+                .statusBarsPadding().navigationBarsPadding().padding(horizontal = 27.dp, vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onClose) { Icon(Icons.Rounded.ArrowBack, "Voltar") }
-                Spacer(Modifier.width(6.dp))
-                Text("Reprodução", fontWeight = FontWeight.SemiBold, color = WarmWhite)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onClose) { Icon(Icons.Rounded.ArrowBack, "Minimizar", tint = WarmWhite) }
                 Spacer(Modifier.weight(1f))
+                Text("OCARINA MUSIC", color = WarmWhite, fontWeight = FontWeight.Bold, fontSize = 12.sp, letterSpacing = 1.sp)
+                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.width(48.dp))
+            }
+            Spacer(Modifier.weight(0.6f))
+            AsyncImage(model = song.artwork, contentDescription = "Capa de ${song.title}", contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxWidth().aspectRatio(1f).shadow(18.dp, RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(16.dp)).background(Raised))
+            Spacer(Modifier.weight(0.7f))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(song.title, color = WarmWhite, fontSize = 24.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(4.dp))
+                    Text(song.artist, color = Muted, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
                 IconButton(onClick = onFavorite) {
                     Icon(if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        "Curtir faixa", tint = if (isFavorite) Lime else Muted)
+                        "Curtir", tint = if (isFavorite) Lime else WarmWhite)
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            // YouTube requires an app-specific HTTP Referer in embedded Android WebViews.
-            // Load the official embedded player directly, with a stable package identity.
-            // We don't extract streams, hide the player, or bypass unavailable embeds.
-            key(song.videoId) {
-                AndroidView(
-                    factory = { viewContext ->
-                        WebView(viewContext).apply {
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            settings.mediaPlaybackRequiresUserGesture = true
-                            settings.javaScriptCanOpenWindowsAutomatically = false
-                            settings.allowFileAccess = false
-                            settings.allowContentAccess = false
-                            webChromeClient = WebChromeClient()
-                            webViewClient = object : WebViewClient() {
-                                override fun onPageFinished(view: WebView?, url: String?) {
-                                    loading = false
-                                }
-                                override fun onReceivedError(
-                                    view: WebView?, request: WebResourceRequest?, error: WebResourceError?
-                                ) {
-                                    if (request?.isForMainFrame == true) {
-                                        loading = false
-                                        playerError = "Não foi possível carregar o player. Confira sua conexão."
-                                    }
-                                }
-                                override fun onReceivedHttpError(
-                                    view: WebView?, request: WebResourceRequest?, errorResponse: android.webkit.WebResourceResponse?
-                                ) {
-                                    if (request?.isForMainFrame == true && (errorResponse?.statusCode ?: 0) >= 400) {
-                                        loading = false
-                                        playerError = "O YouTube recusou o carregamento (${errorResponse?.statusCode})."
-                                    }
-                                }
-                            }
-                            setBackgroundColor(android.graphics.Color.BLACK)
-                            val safeId = song.videoId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }
-                            // Referrer is the Android application ID (not an invented site).
-                            val referrer = "https://${viewContext.packageName}/"
-                            loadUrl(
-                                "https://www.youtube.com/embed/$safeId?playsinline=1&rel=0",
-                                mapOf("Referer" to referrer)
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(16.dp)),
-                    onRelease = { view ->
-                        view.stopLoading()
-                        view.loadUrl("about:blank")
-                        view.destroy()
-                    },
-                )
+            Spacer(Modifier.height(17.dp))
+            if (playback.error != null) {
+                Text(playback.error.orEmpty(), color = Color(0xFFF6AB9D), fontSize = 13.sp,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp))
             }
-            if (loading) {
-                Spacer(Modifier.height(8.dp))
-                Text("Carregando player do YouTube…", color = Muted, fontSize = 12.sp)
-            }
-            playerError?.let { message ->
-                Spacer(Modifier.height(8.dp))
-                Text(message, color = Color(0xFFFFB5AD), fontSize = 12.sp)
-            }
-            Spacer(Modifier.height(19.dp))
-            Text(song.title, fontSize = 22.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold,
-                color = WarmWhite, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(6.dp))
-            Text(song.artist, color = Muted, fontSize = 13.sp)
-            Spacer(Modifier.height(16.dp))
-            Text("Toque em ▶ no vídeo para começar. Se a incorporação for bloqueada, use o YouTube.",
-                fontSize = 11.sp, lineHeight = 15.sp, color = Muted)
-            Spacer(Modifier.height(12.dp))
-            Button(
-                onClick = ::openYouTube,
+            val maxMs = playback.durationMs.coerceAtLeast(1L)
+            var dragging by remember(song.videoId) { mutableStateOf<Float?>(null) }
+            Slider(
+                value = dragging ?: (playback.positionMs.toFloat() / maxMs).coerceIn(0f, 1f),
+                onValueChange = { dragging = it },
+                onValueChangeFinished = {
+                    dragging?.let { playback.seekTo((it * maxMs).toLong()) }
+                    dragging = null
+                },
+                colors = SliderDefaults.colors(thumbColor = WarmWhite, activeTrackColor = Lime, inactiveTrackColor = Raised),
+                enabled = playback.durationMs > 0,
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Lime, contentColor = Ink),
-                shape = RoundedCornerShape(14.dp),
-            ) {
-                Icon(Icons.Rounded.PlayArrow, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Abrir no YouTube", fontWeight = FontWeight.SemiBold)
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(formatTime(playback.positionMs), color = Muted, fontSize = 11.sp)
+                Text(formatTime(playback.durationMs), color = Muted, fontSize = 11.sp)
             }
-            externalError?.let { message ->
-                Spacer(Modifier.height(6.dp))
-                Text(message, color = Color(0xFFFFB5AD), fontSize = 12.sp)
+            Spacer(Modifier.height(13.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onPrevious) {
+                    Icon(Icons.Rounded.SkipPrevious, "Anterior", tint = WarmWhite, modifier = Modifier.size(35.dp))
+                }
+                FilledIconButton(
+                    onClick = { playback.toggle() },
+                    modifier = Modifier.size(74.dp),
+                    enabled = !playback.resolvingAudio,
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = Lime, contentColor = Ink),
+                ) {
+                    if (playback.resolvingAudio || playback.buffering) CircularProgressIndicator(Modifier.size(27.dp), color = Ink, strokeWidth = 3.dp)
+                    else Icon(if (playback.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        if (playback.playing) "Pausar" else "Tocar", modifier = Modifier.size(38.dp))
+                }
+                IconButton(onClick = onNext) {
+                    Icon(Icons.Rounded.SkipNext, "Próxima", tint = WarmWhite, modifier = Modifier.size(35.dp))
+                }
             }
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.weight(0.45f))
+            Text("Reprodução nativa · sem janela de vídeo", color = Muted, fontSize = 11.sp)
         }
     }
+}
+
+private fun formatTime(ms: Long): String {
+    val seconds = (ms / 1000).coerceAtLeast(0)
+    return String.format(Locale.US, "%d:%02d", seconds / 60, seconds % 60)
 }
