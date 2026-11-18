@@ -12,8 +12,8 @@ android {
         applicationId = "com.ocarina.music"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.2.0"
+        versionCode = 5
+        versionName = "0.2.1"
     }
     buildTypes {
         release { isMinifyEnabled = false }
@@ -35,6 +35,8 @@ dependencies {
     implementation("com.github.teamnewpipe:NewPipeExtractor:v0.27.1")
     implementation("androidx.media3:media3-exoplayer:1.9.4")
     implementation("androidx.media3:media3-session:1.9.4")
+    implementation("androidx.media3:media3-datasource:1.9.4")
+    implementation("androidx.media3:media3-database:1.9.4")
 
     implementation(platform("androidx.compose:compose-bom:2025.04.01"))
     implementation("androidx.activity:activity-compose:1.10.1")

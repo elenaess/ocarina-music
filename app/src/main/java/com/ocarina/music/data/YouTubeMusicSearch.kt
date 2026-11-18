@@ -24,9 +24,18 @@ class YouTubeMusicSearch {
 
     private var cachedApiKey: String? = null
     private var cachedVersion: String? = null
+    private val searchCache = object : LinkedHashMap<String, Pair<Long, List<Song>>>(12, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, List<Song>>>): Boolean = size > 12
+    }
 
     suspend fun search(query: String): List<Song> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
+        val cacheKey = query.trim().lowercase(java.util.Locale.ROOT)
+        synchronized(searchCache) {
+            searchCache[cacheKey]?.let { (stored, results) ->
+                if (System.currentTimeMillis() - stored < 120_000L) return@withContext results
+            }
+        }
         val (key, version) = readPublicClientConfig()
         val client = JSONObject().apply {
             put("clientName", "WEB_REMIX")
@@ -57,7 +66,9 @@ class YouTubeMusicSearch {
             }
             JSONObject(response.body?.string() ?: throw IOException("Resposta vazia do catálogo."))
         }
-        extractSongs(data)
+        val songs = extractSongs(data)
+        synchronized(searchCache) { searchCache[cacheKey] = System.currentTimeMillis() to songs }
+        songs
     }
 
     private fun readPublicClientConfig(): Pair<String?, String> {

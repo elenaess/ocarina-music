@@ -79,18 +79,19 @@ fun OcarinaApp() = OcarinaTheme {
     fun playSong(song: Song) {
         val source = if (tab == Tab.LIBRARY) favorites.toList() else songs
         playQueue = source.ifEmpty { listOf(song) }
-        playback.play(song)
+        val idx = playQueue.indexOfFirst { it.videoId == song.videoId }
+        playback.play(song, playQueue.getOrNull(idx + 1))
         showFullPlayer = true
     }
     fun nextSong() {
         val currentId = playback.currentSong?.videoId
         val idx = playQueue.indexOfFirst { it.videoId == currentId }
-        playQueue.getOrNull(idx + 1)?.let { playback.play(it) }
+        playQueue.getOrNull(idx + 1)?.let { playback.play(it, playQueue.getOrNull(idx + 2)) }
     }
     fun previousSong() {
         val currentId = playback.currentSong?.videoId
         val idx = playQueue.indexOfFirst { it.videoId == currentId }
-        playQueue.getOrNull(idx - 1)?.let { playback.play(it) }
+        playQueue.getOrNull(idx - 1)?.let { playback.play(it, playQueue.getOrNull(idx)) }
     }
     var showInfo by remember { mutableStateOf(false) }
 
@@ -232,7 +233,7 @@ fun OcarinaApp() = OcarinaTheme {
             onDismissRequest = { showInfo = false },
             title = { Text("Sobre o Ocarina Music") },
             text = { Text(
-                "Versão 0.2.0 · Player nativo de áudio (Media3). Catálogo e fonte musical experimentais " +
+                "Versão 0.2.1 · Player nativo de áudio (Media3). Catálogo e fonte musical experimentais " +
                     "via YouTube Music / NewPipe. Algumas músicas podem não funcionar. " +
                     "Favoritos são armazenados no dispositivo. Ocarina não é afiliado ao YouTube ou Spotify."
             ) },
@@ -590,7 +591,12 @@ private fun NativePlayerScreen(
                 }
             }
             Spacer(Modifier.weight(0.45f))
-            Text("Reprodução nativa · sem janela de vídeo", color = Muted, fontSize = 11.sp)
+            Text(
+                if (playback.sourceBitrateKbps > 0)
+                    "Áudio original · ${playback.sourceBitrateKbps} kbps estimados pela fonte"
+                else "Áudio original · qualidade conforme a fonte",
+                color = Muted, fontSize = 11.sp,
+            )
         }
     }
 }

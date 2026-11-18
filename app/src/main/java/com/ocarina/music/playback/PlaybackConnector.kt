@@ -33,6 +33,8 @@ class PlaybackConnector(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val connected = CompletableDeferred<MediaController>()
     private var resolving: Job? = null
+    private var prefetchJob: Job? = null
+    private var retryingSource = false
 
     var currentSong by mutableStateOf<Song?>(null)
         private set
@@ -48,6 +50,8 @@ class PlaybackConnector(context: Context) {
         private set
     var durationMs by mutableLongStateOf(0L)
         private set
+    var sourceBitrateKbps by mutableLongStateOf(0L)
+        private set
 
     private val token = SessionToken(appContext, ComponentName(appContext, OcarinaPlaybackService::class.java))
     private val future = MediaController.Builder(appContext, token).buildAsync()
@@ -55,8 +59,16 @@ class PlaybackConnector(context: Context) {
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) { sync(player) }
         override fun onPlayerError(error: PlaybackException) {
-            this@PlaybackConnector.error = "O áudio falhou: ${error.errorCodeName}. Tente outra faixa."
-            buffering = false
+            // Expiring temporary URLs occasionally return 403. Retry the current track once.
+            if (!retryingSource && currentSong != null &&
+                (error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
+                    error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED)) {
+                retryingSource = true
+                play(currentSong!!, null, refresh = true, isRetry = true)
+            } else {
+                this@PlaybackConnector.error = "Não foi possível reproduzir: ${error.errorCodeName}."
+                buffering = false
+            }
         }
     }
 
@@ -99,18 +111,23 @@ class PlaybackConnector(context: Context) {
         }
     }
 
-    fun play(song: Song) {
+    fun play(song: Song, next: Song? = null, refresh: Boolean = false, isRetry: Boolean = false) {
         resolving?.cancel()
+        prefetchJob?.cancel()
+        if (!isRetry) retryingSource = false
         currentSong = song
+        sourceBitrateKbps = 0L
         resolvingAudio = true
         error = null
         resolving = scope.launch {
             try {
-                val url = AudioSourceResolver.resolve(song.videoId)
+                val source = AudioSourceResolver.resolve(song.videoId, refresh = refresh)
                 val c = connected.await()
+                sourceBitrateKbps = source.bitrateKbps.toLong()
                 val item = MediaItem.Builder()
                     .setMediaId(song.videoId)
-                    .setUri(url)
+                    .setUri(source.url)
+                    .setCustomCacheKey("ocarina-${song.videoId}-${source.bitrateKbps}")
                     .setMediaMetadata(MediaMetadata.Builder()
                         .setTitle(song.title)
                         .setArtist(song.artist)
@@ -120,6 +137,18 @@ class PlaybackConnector(context: Context) {
                 c.setMediaItem(item)
                 c.prepare()
                 c.play()
+                // Refresh signed URLs shortly before they are needed, not three minutes early.
+                // Avoid competing with initial playback; URL cache expires after 90 seconds.
+                if (next != null && next.videoId != song.videoId) {
+                    prefetchJob = scope.launch {
+                        while (isActive) {
+                            val remaining = durationMs - positionMs
+                            if (durationMs > 0 && remaining in 1..25_000L) break
+                            delay(1_000)
+                        }
+                        if (isActive) runCatching { AudioSourceResolver.resolve(next.videoId) }
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -137,6 +166,7 @@ class PlaybackConnector(context: Context) {
     fun clearError() { error = null }
     fun close() {
         resolving?.cancel()
+        prefetchJob?.cancel()
         controller?.removeListener(listener)
         MediaController.releaseFuture(future)
         scope.cancel()
