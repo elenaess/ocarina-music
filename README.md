@@ -1,4 +1,4 @@
-# ocarina music — Android v0.1.0 (MVP)
+# ocarina music — Android v0.1.1 (MVP)
 
 > Uma nova casa para a música. App Android original em Kotlin + Jetpack Compose.
 
@@ -19,43 +19,25 @@
 - Login Google/Spotify, importação de playlists Spotify, recomendações personalizadas ou sincronização entre aparelhos.
 - Garantia de cobertura de todo o catálogo ou disponibilidade permanente da API não oficial.
 
-## Publicar pelo Android com Termux
+## Atualizar o repositório existente pelo Android (Termux)
 
-1. Baixe `Ocarina-Music-v0.1-fonte.zip` para a pasta Downloads.
-2. No Termux: `pkg install git gh unzip && termux-setup-storage`
-3. Rode: `unzip -o ~/storage/downloads/Ocarina-Music-v0.1-fonte.zip -d ~`
-4. Rode: `cd ~/ocarina-music && bash push-to-github.sh`
-5. Se o GitHub CLI solicitar, faça login via navegador. O script envia os arquivos ao repositório `elenaess/ocarina-music`.
+1. Baixe `Ocarina-Music-corrigido-v0.1.1.zip` para Downloads.
+2. `pkg install git gh tar unzip && termux-setup-storage`
+3. `unzip -o ~/storage/downloads/Ocarina-Music-corrigido-v0.1.1.zip -d ~`
+4. `bash ~/ocarina-music/push-to-github.sh`
+5. Acesse Actions para ver a execução disparada pelo push.
 
-**Atenção:** o script não sobrescreve remotamente outros projetos; ele rejeita `origin` diferente e usa `git push` sem `--force`. Se o repositório ganhar commits enquanto você prepara o envio, resolva os conflitos antes de prosseguir.
+O script clona a versão remota mais recente num diretório temporário, copia os arquivos desta versão sem apagar arquivos extras do repositório, faz commit e push sem `--force`.
 
 ## Como gerar um APK (caminho mais fácil: GitHub Actions)
 
 1. Crie um repositório GitHub privado ou público chamado `ocarina-music`.
 2. Adicione **o conteúdo desta pasta** à raiz do repositório, incluindo `.github/workflows/android.yml`.
 3. Vá em **Actions > Ocarina Music APK > Run workflow** (ou faça um push na branch `main`).
-4. Ao terminar, abra a execução e baixe o artefato `ocarina-music-v0.1-debug`.
+4. Ao terminar, abra a execução e baixe o artefato `ocarina-music-v0.1.1-debug`.
 5. Dentro do artefato estará o arquivo `app-debug.apk` para instalar em seu Android.
 
 O workflow instala Java 17, SDK Android 35, Gradle 8.13, compila `:app:assembleDebug` e publica o artefato. GitHub Actions pode ter limites de uso conforme o plano/repositório.
-
-### Usando Termux para enviar o conteúdo a um repositório vazio
-
-Depois de criar o repositório vazio no GitHub e autenticar o `git`:
-
-```bash
-pkg install git unzip
-unzip Ocarina-Music-v0.1-fonte.zip
-cd ocarina-music
-git init
-git add .
-git commit -m "Ocarina Music v0.1"
-git branch -M main
-git remote add origin https://github.com/elenaess/ocarina-music.git
-git push -u origin main
-```
-
-Substitua `SEU_USUARIO` pelo usuário do seu GitHub. **Não insira sua senha ou token no código do aplicativo.**
 
 ### Usando Android Studio
 
@@ -90,4 +72,4 @@ Não afiliado ao Spotify, YouTube ou Google. Marcas citadas pertencem a seus tit
 2. Adicionar player nativo e MediaSession quando houver uma fonte de áudio permitida e estável.
 3. Importar dados de playlists, adicionar cache inteligente e refinar acessibilidade/animações.
 
-**Status:** código-fonte inicial gerado. Compilação Android ainda não verificada neste ambiente por falta de Android SDK e Gradle.
+**Status:** correção da falha de `setup-android@v3` aplicada após leitura do log do GitHub Actions. O APK ainda não foi compilado nem validado neste ambiente (sem Android SDK/Gradle).

@@ -1,31 +1,36 @@
 #!/usr/bin/env bash
+# Publica esta versão corrigida no repositório existente, sem forçar histórico.
 set -euo pipefail
-cd "$(dirname "$0")"
+SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="https://github.com/elenaess/ocarina-music.git"
 
-if ! command -v gh >/dev/null 2>&1; then
-  echo 'Instale o GitHub CLI: pkg install gh'; exit 1
-fi
+for dep in git gh tar; do
+  if ! command -v "$dep" >/dev/null 2>&1; then
+    echo "Falta instalar: $dep (Termux: pkg install git gh tar)"; exit 1
+  fi
+done
 if ! gh auth status >/dev/null 2>&1; then
-  echo 'Entre na sua conta do GitHub para autorizar o envio:'
+  echo 'Entre na sua conta do GitHub:'
   gh auth login
 fi
 gh auth setup-git
 
-if [ ! -d .git ]; then git init -b main; fi
-if ! git remote get-url origin >/dev/null 2>&1; then
-  git remote add origin "$REPO"
-fi
-if [ "$(git remote get-url origin)" != "$REPO" ]; then
-  echo 'Remote origin diferente: confira o repositório antes de enviar.'; exit 1
-fi
+# Sempre parte do último commit remoto. Evita erro non-fast-forward de ZIP antigo.
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf "$WORKDIR"' EXIT
 
+git clone --branch main --single-branch "$REPO" "$WORKDIR/ocarina-music"
+# Sobrescreve arquivos correspondentes, preserva outros existentes no remoto.
+# Evita transportar .git acidental de um diretório já usado anteriormente.
+(cd "$SOURCE_DIR" && tar --exclude='./.git' -cf - .) | (cd "$WORKDIR/ocarina-music" && tar -xf -)
+cd "$WORKDIR/ocarina-music"
 git add -A
-if ! git diff --cached --quiet; then
-  git -c user.name='elenaess' \
-      -c user.email='289515223+elenaess@users.noreply.github.com' \
-      commit -m 'feat: Ocarina Music Android v0.1'
+if git diff --cached --quiet; then
+  echo 'GitHub já contém esses arquivos. Nenhuma alteração pendente.'
+  exit 0
 fi
-git branch -M main
-git push -u origin main
-printf '\nCódigo enviado! Abra https://github.com/elenaess/ocarina-music/actions\n'
+git -c user.name='elenaess' \
+    -c user.email='289515223+elenaess@users.noreply.github.com' \
+    commit -m 'fix: corrigir configuração Android SDK no GitHub Actions'
+git push origin main
+printf '\nCódigo enviado. Abra https://github.com/elenaess/ocarina-music/actions\n'
