@@ -1,6 +1,11 @@
 package com.ocarina.music.ui
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -206,12 +211,24 @@ fun OcarinaApp() = OcarinaTheme {
             title = { Text("Sobre o ocarina music") },
             text = {
                 Text(
-                    "Versão 0.1.2 • experimental. Busca pelo catálogo não oficial do YouTube Music e reprodução " +
+                    "Versão 0.1.3 • experimental. Busca pelo catálogo não oficial do YouTube Music e reprodução " +
                         "pelo player incorporado do YouTube. Os favoritos ficam apenas neste dispositivo. " +
                         "Não somos afiliados ao Google ou ao Spotify."
                 )
             },
             confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Entendi") } },
+            dismissButton = {
+                TextButton(onClick = {
+                    showInfo = false
+                    // Public YouTube test video; checks embedded playback independently of music search.
+                    playerSong = Song(
+                        videoId = "jNQXAC9IVRw",
+                        title = "Vídeo de teste do player",
+                        artist = "Teste de conexão com o YouTube",
+                        artwork = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg"
+                    )
+                }) { Text("Testar reprodução") }
+            },
         )
     }
 }
@@ -460,6 +477,26 @@ private fun ErrorState(message: String, onRetry: () -> Unit) {
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun PlayerDialog(song: Song, isFavorite: Boolean, onFavorite: () -> Unit, onClose: () -> Unit) {
+    val context = LocalContext.current
+    var loading by remember(song.videoId) { mutableStateOf(true) }
+    var playerError by remember(song.videoId) { mutableStateOf<String?>(null) }
+    var externalError by remember(song.videoId) { mutableStateOf<String?>(null) }
+
+    fun openYouTube() {
+        val safeId = song.videoId.takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) } ?: return
+        try {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$safeId"))
+                    .addCategory(Intent.CATEGORY_BROWSABLE)
+            )
+            externalError = null
+        } catch (_: ActivityNotFoundException) {
+            externalError = "Não foi encontrado um navegador ou app do YouTube neste aparelho."
+        } catch (_: SecurityException) {
+            externalError = "O Android não permitiu abrir o link."
+        }
+    }
+
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
@@ -469,7 +506,7 @@ private fun PlayerDialog(song: Song, isFavorite: Boolean, onFavorite: () -> Unit
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose) { Icon(Icons.Rounded.ArrowBack, "Voltar") }
                 Spacer(Modifier.width(6.dp))
-                Text("Reproduzindo", fontWeight = FontWeight.SemiBold, color = WarmWhite)
+                Text("Reprodução", fontWeight = FontWeight.SemiBold, color = WarmWhite)
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = onFavorite) {
                     Icon(if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
@@ -477,43 +514,92 @@ private fun PlayerDialog(song: Song, isFavorite: Boolean, onFavorite: () -> Unit
                 }
             }
             Spacer(Modifier.height(12.dp))
-            AndroidView(
-                factory = { context ->
-                    WebView(context).apply {
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.mediaPlaybackRequiresUserGesture = false
-                        webViewClient = WebViewClient()
-                        webChromeClient = WebChromeClient()
-                        setBackgroundColor(android.graphics.Color.BLACK)
-                        val safeId = song.videoId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }
-                        val html = """
-                            <!DOCTYPE html><html><head>
-                            <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
-                            <style>html,body{margin:0;background:#000;width:100%;height:100%;overflow:hidden}iframe{width:100%;height:100%;border:0}</style>
-                            </head><body><iframe
-                            src="https://www.youtube.com/embed/$safeId?autoplay=1&amp;playsinline=1&amp;rel=0"
-                            title="YouTube player" allow="autoplay; encrypted-media; picture-in-picture"
-                            allowfullscreen></iframe></body></html>
-                        """.trimIndent()
-                        loadDataWithBaseURL("https://www.youtube.com/", html, "text/html", "UTF-8", null)
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(16.dp)),
-                onRelease = { it.stopLoading(); it.destroy() },
-            )
+            // YouTube requires an app-specific HTTP Referer in embedded Android WebViews.
+            // Load the official embedded player directly, with a stable package identity.
+            // We don't extract streams, hide the player, or bypass unavailable embeds.
+            key(song.videoId) {
+                AndroidView(
+                    factory = { viewContext ->
+                        WebView(viewContext).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.mediaPlaybackRequiresUserGesture = true
+                            settings.javaScriptCanOpenWindowsAutomatically = false
+                            settings.allowFileAccess = false
+                            settings.allowContentAccess = false
+                            webChromeClient = WebChromeClient()
+                            webViewClient = object : WebViewClient() {
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    loading = false
+                                }
+                                override fun onReceivedError(
+                                    view: WebView?, request: WebResourceRequest?, error: WebResourceError?
+                                ) {
+                                    if (request?.isForMainFrame == true) {
+                                        loading = false
+                                        playerError = "Não foi possível carregar o player. Confira sua conexão."
+                                    }
+                                }
+                                override fun onReceivedHttpError(
+                                    view: WebView?, request: WebResourceRequest?, errorResponse: android.webkit.WebResourceResponse?
+                                ) {
+                                    if (request?.isForMainFrame == true && (errorResponse?.statusCode ?: 0) >= 400) {
+                                        loading = false
+                                        playerError = "O YouTube recusou o carregamento (${errorResponse?.statusCode})."
+                                    }
+                                }
+                            }
+                            setBackgroundColor(android.graphics.Color.BLACK)
+                            val safeId = song.videoId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+                            // Referrer is the Android application ID (not an invented site).
+                            val referrer = "https://${viewContext.packageName}/"
+                            loadUrl(
+                                "https://www.youtube.com/embed/$safeId?playsinline=1&rel=0",
+                                mapOf("Referer" to referrer)
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                        .clip(RoundedCornerShape(16.dp)),
+                    onRelease = { view ->
+                        view.stopLoading()
+                        view.loadUrl("about:blank")
+                        view.destroy()
+                    },
+                )
+            }
+            if (loading) {
+                Spacer(Modifier.height(8.dp))
+                Text("Carregando player do YouTube…", color = Muted, fontSize = 12.sp)
+            }
+            playerError?.let { message ->
+                Spacer(Modifier.height(8.dp))
+                Text(message, color = Color(0xFFFFB5AD), fontSize = 12.sp)
+            }
             Spacer(Modifier.height(19.dp))
             Text(song.title, fontSize = 22.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold,
                 color = WarmWhite, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(6.dp))
             Text(song.artist, color = Muted, fontSize = 13.sp)
-            Spacer(Modifier.height(20.dp))
-            Text(
-                "Player incorporado do YouTube • A reprodução é interrompida ao fechar esta janela.",
-                fontSize = 11.sp, lineHeight = 15.sp, color = Muted,
-            )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(16.dp))
+            Text("Toque em ▶ no vídeo para começar. Se a incorporação for bloqueada, use o YouTube.",
+                fontSize = 11.sp, lineHeight = 15.sp, color = Muted)
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = ::openYouTube,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Lime, contentColor = Ink),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Icon(Icons.Rounded.PlayArrow, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Abrir no YouTube", fontWeight = FontWeight.SemiBold)
+            }
+            externalError?.let { message ->
+                Spacer(Modifier.height(6.dp))
+                Text(message, color = Color(0xFFFFB5AD), fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(4.dp))
         }
     }
 }

@@ -1,4 +1,4 @@
-# ocarina music — Android v0.1.1 (MVP)
+# ocarina music — Android v0.1.3 (MVP)
 
 > Uma nova casa para a música. App Android original em Kotlin + Jetpack Compose.
 
@@ -21,9 +21,9 @@
 
 ## Atualizar o repositório existente pelo Android (Termux)
 
-1. Baixe `Ocarina-Music-corrigido-v0.1.1.zip` para Downloads.
+1. Baixe `Ocarina-Music-v0.1.3-player.zip` para Downloads.
 2. `pkg install git gh tar unzip && termux-setup-storage`
-3. `unzip -o ~/storage/downloads/Ocarina-Music-corrigido-v0.1.1.zip -d ~`
+3. `unzip -o ~/storage/downloads/Ocarina-Music-v0.1.3-player.zip -d ~`
 4. `bash ~/ocarina-music/push-to-github.sh`
 5. Acesse Actions para ver a execução disparada pelo push.
 
@@ -34,7 +34,7 @@ O script clona a versão remota mais recente num diretório temporário, copia o
 1. Crie um repositório GitHub privado ou público chamado `ocarina-music`.
 2. Adicione **o conteúdo desta pasta** à raiz do repositório, incluindo `.github/workflows/android.yml`.
 3. Vá em **Actions > Ocarina Music APK > Run workflow** (ou faça um push na branch `main`).
-4. Ao terminar, abra a execução e baixe o artefato `ocarina-music-v0.1.1-debug`.
+4. Ao terminar, abra a execução e baixe o artefato `ocarina-music-v0.1.3-debug`.
 5. Dentro do artefato estará o arquivo `app-debug.apk` para instalar em seu Android.
 
 O workflow instala Java 17, SDK Android 35, Gradle 8.13, compila `:app:assembleDebug` e publica o artefato. GitHub Actions pode ter limites de uso conforme o plano/repositório.
@@ -81,3 +81,24 @@ selecionava Compose `1.12.1`, que exige compileSdk 37 e Android Gradle Plugin 9.
 Esta versão fixa a BOM em `2025.04.01` (Compose 1.8), compatível com a
 configuração atual de compileSdk 35 e AGP 8.13.2, sem mudar a funcionalidade do aplicativo.
 A compilação completa ainda não foi testada localmente; o workflow fará essa verificação no GitHub.
+
+
+## Atualização v0.1.3 — player e fallback
+
+O player usa agora a URL oficial de incorporação (`youtube.com/embed`) carregada
+diretamente na WebView com cabeçalho `Referer: https://com.ocarina.music/`,
+seguindo o formato de identificação de aplicativos Android documentado pelo YouTube.
+O usuário precisa tocar no botão Play do vídeo: não há autoplay nem áudio oculto.
+
+Adicionado botão **Abrir no YouTube** como alternativa quando o embed estiver
+indisponível ou bloqueado por direitos/privacidade/rede. Esse botão abre um
+app externo ou navegador e, portanto, não é reprodução nativa do Ocarina.
+
+Na janela **Sobre** há um botão **Testar reprodução** que abre um vídeo público
+de teste independente da busca. Se ele reproduzir, mas outros não, a falha pode
+estar no vídeo específico ou nos resultados do catálogo. Se o vídeo de teste
+também falhar dentro do app, use o botão externo e registre o erro que aparece.
+
+A busca InnerTube permanece não oficial/experimental. Não há promessa de
+reprodução de todas as faixas ou em segundo plano. Esta versão ainda precisa
+ser compilada e testada no aparelho, apesar de os arquivos terem sido revisados.
