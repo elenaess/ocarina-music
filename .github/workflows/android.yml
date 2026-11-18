@@ -25,9 +25,9 @@ jobs:
       - name: Install Android SDK 35
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Build debug APK
-        run: gradle --no-daemon :app:assembleDebug
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: ocarina-music-v0.1.1-debug
+          name: ocarina-music-v0.1.2-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

@@ -206,7 +206,7 @@ fun OcarinaApp() = OcarinaTheme {
             title = { Text("Sobre o ocarina music") },
             text = {
                 Text(
-                    "Versão 0.1 • experimental. Busca pelo catálogo não oficial do YouTube Music e reprodução " +
+                    "Versão 0.1.2 • experimental. Busca pelo catálogo não oficial do YouTube Music e reprodução " +
                         "pelo player incorporado do YouTube. Os favoritos ficam apenas neste dispositivo. " +
                         "Não somos afiliados ao Google ou ao Spotify."
                 )

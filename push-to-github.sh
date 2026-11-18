@@ -31,6 +31,6 @@ if git diff --cached --quiet; then
 fi
 git -c user.name='elenaess' \
     -c user.email='289515223+elenaess@users.noreply.github.com' \
-    commit -m 'fix: corrigir configuração Android SDK no GitHub Actions'
+    commit -m 'fix: alinhar Compose BOM com Android SDK 35 (v0.1.2)'
 git push origin main
 printf '\nCódigo enviado. Abra https://github.com/elenaess/ocarina-music/actions\n'

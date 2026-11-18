@@ -73,3 +73,11 @@ Não afiliado ao Spotify, YouTube ou Google. Marcas citadas pertencem a seus tit
 3. Importar dados de playlists, adicionar cache inteligente e refinar acessibilidade/animações.
 
 **Status:** correção da falha de `setup-android@v3` aplicada após leitura do log do GitHub Actions. O APK ainda não foi compilado nem validado neste ambiente (sem Android SDK/Gradle).
+
+## Atualização v0.1.2 — correção de build
+
+O build #2 falhou em `:app:checkDebugAarMetadata` porque a BOM Compose `2026.09.00`
+selecionava Compose `1.12.1`, que exige compileSdk 37 e Android Gradle Plugin 9.1+.
+Esta versão fixa a BOM em `2025.04.01` (Compose 1.8), compatível com a
+configuração atual de compileSdk 35 e AGP 8.13.2, sem mudar a funcionalidade do aplicativo.
+A compilação completa ainda não foi testada localmente; o workflow fará essa verificação no GitHub.
