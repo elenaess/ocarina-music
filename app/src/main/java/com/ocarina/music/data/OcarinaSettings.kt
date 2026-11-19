@@ -16,6 +16,10 @@ class OcarinaSettings(context: Context) {
         return preferences.getBoolean("dark_theme", true)
     }
     fun setDark(value: Boolean) { preferences.edit().putBoolean("dark_theme", value).apply() }
+    fun smartQueueEnabled(): Boolean = preferences.getBoolean("smart_queue_enabled", true)
+    fun setSmartQueueEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean("smart_queue_enabled", enabled).apply()
+    }
     fun repeatMode(): Int = preferences.getInt("repeat_mode", 0).coerceIn(0, 2)
     fun setRepeatMode(value: Int) { preferences.edit().putInt("repeat_mode", value.coerceIn(0, 2)).apply() }
     private fun recentKey(uid: String?): String = if (uid.isNullOrBlank()) "recent_played_guest" else "recent_played_$uid"

@@ -13,6 +13,11 @@ import androidx.compose.foundation.Image
 import coil.compose.AsyncImage
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
@@ -156,6 +161,8 @@ fun OcarinaApp() {
         var newPlaylistName by remember { mutableStateOf("") }
         var songForNewPlaylist by remember { mutableStateOf<Song?>(null) }
         var showQueue by remember { mutableStateOf(false) }
+        var smartQueue by remember { mutableStateOf(settings.smartQueueEnabled()) }
+        val smartPlayed = remember { mutableStateListOf<String>() }
         var selectedCatalog by remember { mutableStateOf<CatalogEntry?>(null) }
         var catalogQuery by remember { mutableStateOf("") }
         var catalogResults by remember { mutableStateOf<List<CatalogEntry>>(emptyList()) }
@@ -257,6 +264,8 @@ fun OcarinaApp() {
                 playback.resetForLogout()
                 showFullPlayer = false
                 queue = emptyList()
+                showQueue = false
+                smartPlayed.clear()
                 screen = Screen.HOME
             }
             syncedAccount = null
@@ -301,8 +310,32 @@ fun OcarinaApp() {
             store.save(favorites.toList(), account.user?.uid)
             account.setFavorite(song, adding)
         }
+        fun queueSuggestions(current: Song?): List<Song> {
+            val currentId = current?.videoId
+            return (favorites + recent + discoverSongs).distinctBy { it.videoId }
+                .asSequence()
+                .filter { it.videoId != currentId && it.videoId !in smartPlayed &&
+                    queue.none { queued -> queued.videoId == it.videoId } }
+                .sortedWith(compareByDescending<Song> { current != null &&
+                    it.artist.equals(current.artist, ignoreCase = true) })
+                .take(5).toList()
+        }
+        fun nextInQueue(current: Song?): Song? {
+            current ?: return null
+            val position = queue.indexOfFirst { it.videoId == current.videoId }
+            if (position >= 0) queue.getOrNull(position + 1)?.let { return it }
+            if (playback.repeatMode == 2) return queue.firstOrNull()
+            if (!smartQueue) return null
+            val suggestion = queueSuggestions(current).firstOrNull() ?: return null
+            queue = queue + suggestion
+            smartPlayed.add(suggestion.videoId)
+            return suggestion
+        }
+        fun showQueueScreen() { showQueue = true }
+
         fun playSong(song: Song, source: List<Song>) {
             queue = source.ifEmpty { listOf(song) }
+            smartPlayed.clear()
             val index = queue.indexOfFirst { it.videoId == song.videoId }
             playback.play(song, queue.getOrNull(index + 1))
             recent.removeAll { it.videoId == song.videoId }
@@ -312,10 +345,7 @@ fun OcarinaApp() {
             showFullPlayer = true
         }
         fun next() {
-            val i = queue.indexOfFirst { it.videoId == playback.currentSong?.videoId }
-            val nextSong = queue.getOrNull(i + 1)
-                ?: if (playback.repeatMode == 2) queue.firstOrNull() else null
-            nextSong?.let { playback.play(it) }
+            nextInQueue(playback.currentSong)?.let { playback.play(it) }
         }
         fun previous() {
             val i = queue.indexOfFirst { it.videoId == playback.currentSong?.videoId }
@@ -440,10 +470,13 @@ fun OcarinaApp() {
         }
         SideEffect {
             playback.onTrackEnded = { ended ->
-                val position = queue.indexOfFirst { it.videoId == ended.videoId }
-                val candidate = if (position < 0) null else queue.getOrNull(position + 1)
-                    ?: if (playback.repeatMode == 2) queue.firstOrNull() else null
-                if (candidate != null) playback.play(candidate)
+                nextInQueue(ended)?.let { nextTrack ->
+                    playback.play(nextTrack)
+                    recent.removeAll { it.videoId == nextTrack.videoId }
+                    recent.add(0, nextTrack)
+                    if (recent.size > 12) recent.removeAt(recent.lastIndex)
+                    settings.addRecent(nextTrack, account.user?.uid)
+                }
             }
         }
         if (!account.authReady) {
@@ -652,22 +685,67 @@ fun OcarinaApp() {
         }
 
         } // Descarta as listas pesadas enquanto o player está aberto.
-        if (showFullPlayer && playback.currentSong != null) {
-            NativePlayerScreen(
-                playback = playback,
-                isFavorite = favorites.any { it.videoId == playback.currentSong?.videoId },
-                onFavorite = { playback.currentSong?.let(::toggleFavorite) },
-                onClose = { showFullPlayer = false }, onNext = ::next, onPrevious = ::previous,
-                onQueue = { showQueue = true },
-                onRepeat = { playback.cycleRepeat() },
-                onShare = { playback.currentSong?.let(::shareSong) },
-            )
+        AnimatedVisibility(
+            visible = showFullPlayer && playback.currentSong != null,
+            modifier = Modifier.fillMaxSize().zIndex(3f),
+            enter = slideInVertically(initialOffsetY = { it },
+                animationSpec = tween(295, easing = FastOutSlowInEasing)) + fadeIn(tween(130)),
+            exit = slideOutVertically(targetOffsetY = { it },
+                animationSpec = tween(280, easing = FastOutSlowInEasing)) + fadeOut(tween(190)),
+        ) {
+            AnimatedContent(
+                targetState = showQueue,
+                transitionSpec = {
+                    if (targetState) {
+                        // The queue descends into place beneath its compact now-playing header.
+                        (slideInVertically(initialOffsetY = { -it / 2 }, animationSpec = tween(300,
+                            easing = FastOutSlowInEasing)) + fadeIn(tween(165))) togetherWith
+                        (slideOutVertically(targetOffsetY = { it / 3 }, animationSpec = tween(275,
+                            easing = FastOutSlowInEasing)) + fadeOut(tween(170)))
+                    } else {
+                        // Dismissal takes the queue upward and returns to the full player.
+                        (slideInVertically(initialOffsetY = { it / 3 }, animationSpec = tween(300,
+                            easing = FastOutSlowInEasing)) + fadeIn(tween(165))) togetherWith
+                        (slideOutVertically(targetOffsetY = { -it }, animationSpec = tween(270,
+                            easing = FastOutSlowInEasing)) + fadeOut(tween(160)))
+                    }
+                },
+                label = "ocarina-queue-under-player",
+            ) { queueVisible ->
+                if (queueVisible) {
+                    OcarinaSmartQueueScreen(
+                        current = playback.currentSong,
+                        queue = queue,
+                        playback = playback,
+                        repeat = playback.repeatMode,
+                        smartEnabled = smartQueue,
+                        suggestions = if (smartQueue) queueSuggestions(playback.currentSong) else emptyList(),
+                        onSmartChange = { enabled ->
+                            smartQueue = enabled
+                            settings.setSmartQueueEnabled(enabled)
+                        },
+                        onPlay = { song -> showQueue = false; playSong(song, queue) },
+                        onRemove = { song -> queue = queue.filterNot { it.videoId == song.videoId } },
+                        onAdd = { song ->
+                            if (queue.none { it.videoId == song.videoId }) queue = queue + song
+                            smartPlayed.add(song.videoId)
+                        },
+                        onBack = { showQueue = false },
+                    )
+                } else {
+                    NativePlayerScreen(
+                        playback = playback,
+                        isFavorite = favorites.any { it.videoId == playback.currentSong?.videoId },
+                        onFavorite = { playback.currentSong?.let(::toggleFavorite) },
+                        onClose = { showFullPlayer = false }, onNext = ::next, onPrevious = ::previous,
+                        onQueue = ::showQueueScreen,
+                        onRepeat = { playback.cycleRepeat() },
+                        onShare = { playback.currentSong?.let(::shareSong) },
+                    )
+                }
+            }
         }
         }
-        if (showQueue) OcarinaQueueDialog(queue, playback.currentSong?.videoId, playback.repeatMode,
-            onSelect = { song -> showQueue = false; playSong(song, queue) },
-            onRemove = { song -> queue = queue.filterNot { it.videoId == song.videoId } },
-            onDismiss = { showQueue = false })
         addToPlaylist?.let { song ->
             OcarinaPickPlaylistDialog(playlists, song,
                 onPick = { list -> putInPlaylist(list, song); addToPlaylist = null },
@@ -721,7 +799,7 @@ fun OcarinaApp() {
             AlertDialog(
                 onDismissRequest = { showInfo = false },
                 title = { Text("Ocarina") },
-                text = { Text("Versão 0.5.1. Contas Google e e-mail pelo Firebase, foto e favoritos no Firestore. Psiu ainda não está integrado. Reprodução experimental via fontes externas.") },
+                text = { Text("Versão 0.5.4. Contas Google e e-mail pelo Firebase, foto e favoritos no Firestore. Psiu ainda não está integrado. Reprodução experimental via fontes externas.") },
                 confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Entendi") } },
             )
         }
@@ -1308,4 +1386,127 @@ private fun NativePlayerScreen(
 private fun formatTime(ms: Long): String {
     val seconds = (ms / 1000).coerceAtLeast(0)
     return String.format(Locale.US, "%d:%02d", seconds / 60, seconds % 60)
+}
+
+/** Smart listening queue is a full player layer, never a blocking dialog. */
+@Composable
+private fun OcarinaSmartQueueScreen(
+    current: Song?, queue: List<Song>, playback: PlaybackConnector, repeat: Int,
+    smartEnabled: Boolean, suggestions: List<Song>,
+    onSmartChange: (Boolean) -> Unit, onPlay: (Song) -> Unit,
+    onRemove: (Song) -> Unit, onAdd: (Song) -> Unit, onBack: () -> Unit,
+) {
+    val c = ocarinaColors
+    val index = queue.indexOfFirst { it.videoId == current?.videoId }
+    val upcoming = if (index >= 0) queue.drop(index + 1) else queue
+    Column(Modifier.fillMaxSize().background(c.background).statusBarsPadding()
+        .navigationBarsPadding().padding(horizontal = 20.dp)) {
+        Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                LIcon(LucideR.drawable.lucide_ic_chevron_down,
+                    "Voltar ao player", Modifier.size(27.dp), c.accent)
+            }
+            Spacer(Modifier.width(6.dp))
+            Text("Fila de escuta", modifier = Modifier.weight(1f),
+                color = c.text, fontSize = 23.sp, fontWeight = FontWeight.SemiBold)
+            Text("${queue.size} faixas", color = c.muted, fontSize = 12.sp)
+        }
+        // The active song stays visible above the listening list.
+        current?.let { song ->
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp))
+                .background(c.elevated).clickable(onClick = onBack)
+                .padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                AlbumArtwork(song, modifier = Modifier.size(70.dp).clip(RoundedCornerShape(16.dp)), small = true)
+                Spacer(Modifier.width(13.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("TOCANDO AGORA", color = c.accent, fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold, letterSpacing = 0.9.sp)
+                    Spacer(Modifier.height(5.dp))
+                    Text(song.title, color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(song.artist, color = c.muted, fontSize = 12.sp, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = { playback.toggle() }) {
+                    LIcon(if (playback.playing) LucideR.drawable.lucide_ic_pause
+                        else LucideR.drawable.lucide_ic_play, "Tocar ou pausar", Modifier.size(25.dp), c.accent)
+                }
+            }
+        }
+        Spacer(Modifier.height(17.dp))
+        LazyColumn(Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item {
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+                    .background(c.surface).padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Fila inteligente", color = c.text, fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold)
+                        Text("Continua com suas curtidas e descobertas quando a fila acabar.",
+                            color = c.muted, fontSize = 11.sp, lineHeight = 15.sp)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Switch(checked = smartEnabled, onCheckedChange = onSmartChange,
+                        colors = SwitchDefaults.colors(checkedThumbColor = c.onAccent,
+                            checkedTrackColor = c.accent))
+                }
+            }
+            item {
+                Spacer(Modifier.height(4.dp))
+                Text("A seguir", color = c.text, fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold)
+                if (upcoming.isEmpty()) Text("A fila está livre para novas músicas.",
+                    color = c.muted, fontSize = 12.sp)
+            }
+            items(upcoming, key = { "queue-${it.videoId}" }) { song ->
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp))
+                    .clickable { onPlay(song) }.padding(vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    AlbumArtwork(song, modifier = Modifier.size(49.dp).clip(RoundedCornerShape(11.dp)), small = true)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(song.title, color = c.text, fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis)
+                        Text(song.artist, color = c.muted, fontSize = 11.sp, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis)
+                    }
+                    IconButton(onClick = { onRemove(song) }) {
+                        LIcon(LucideR.drawable.lucide_ic_x, "Remover da fila", Modifier.size(20.dp), c.muted)
+                    }
+                }
+            }
+            if (smartEnabled && suggestions.isNotEmpty()) {
+                item {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Para continuar ouvindo", color = c.text,
+                        fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Sugestões do que você já curtiu ou ouviu", color = c.muted, fontSize = 12.sp)
+                }
+                items(suggestions, key = { "suggest-${it.videoId}" }) { song ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        AlbumArtwork(song, modifier = Modifier.size(49.dp).clip(RoundedCornerShape(11.dp)), small = true)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(song.title, color = c.text, fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis)
+                            Text(song.artist, color = c.muted, fontSize = 11.sp, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(onClick = { onAdd(song) }) {
+                            LIcon(LucideR.drawable.lucide_ic_plus, "Adicionar à fila", Modifier.size(21.dp), c.accent)
+                        }
+                    }
+                }
+            }
+            item {
+                Text("Repetição: ${when(repeat) { 1 -> "uma música"; 2 -> "toda a lista"; else -> "desligada" }}",
+                    modifier = Modifier.padding(top = 12.dp), color = c.muted, fontSize = 11.sp)
+            }
+        }
+    }
 }

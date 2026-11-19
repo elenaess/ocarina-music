@@ -12,6 +12,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -209,30 +213,56 @@ fun OcarinaV5Header(screen: String, account: OcarinaAccount,
     }
 }
 
+/** One moving indicator, not four independent highlighted backgrounds. */
 @Composable
 fun OcarinaV5Nav(selected: String, account: OcarinaAccount, onSelect: (String) -> Unit) {
     val c = ocarinaColors
-    val tabs = listOf("HOME", "SEARCH", "LIBRARY", "PROFILE")
-    val icons = listOf(LucideR.drawable.lucide_ic_house, LucideR.drawable.lucide_ic_search,
-        LucideR.drawable.lucide_ic_library, LucideR.drawable.lucide_ic_user_round)
-    Row(Modifier.fillMaxWidth().background(c.background).navigationBarsPadding()
-        .height(57.dp).padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceAround) {
-        tabs.forEachIndexed { idx, tab ->
-            val active = selected == tab || (selected == "PROFILE_EDIT" && tab == "PROFILE")
-            val interaction = remember(tab) { MutableInteractionSource() }
-            Box(Modifier.weight(1f).fillMaxHeight()
-                .clickable(interactionSource = interaction, indication = null) {
-                    if (!active) onSelect(tab)
-                }, contentAlignment = Alignment.Center) {
-                Box(Modifier.size(width = 56.dp, height = 41.dp).clip(RoundedCornerShape(22.dp))
-                    .background(if (active) c.softAccent else Color.Transparent),
-                    contentAlignment = Alignment.Center) {
+    val tabs = remember { listOf("HOME", "SEARCH", "LIBRARY", "PROFILE") }
+    val icons = remember { listOf(LucideR.drawable.lucide_ic_house, LucideR.drawable.lucide_ic_search,
+        LucideR.drawable.lucide_ic_library, LucideR.drawable.lucide_ic_user_round) }
+    val activeTab = when (selected) {
+        "SEARCH" -> "SEARCH"
+        "LIBRARY", "LIKED", "PLAYLISTS", "PLAYLIST_DETAIL", "ARTISTS", "ALBUMS",
+        "CATALOG_DETAIL", "DOWNLOADS", "PUBLIC_PLAYLIST" -> "LIBRARY"
+        "PROFILE", "PROFILE_EDIT", "PUBLIC_PROFILE" -> "PROFILE"
+        else -> "HOME"
+    }
+    val currentIndex = tabs.indexOf(activeTab).coerceAtLeast(0)
+    BoxWithConstraints(
+        Modifier.fillMaxWidth().background(c.background).navigationBarsPadding()
+            .height(57.dp).padding(horizontal = 14.dp)
+    ) {
+        val slot = maxWidth / tabs.size
+        val pillWidth = 56.dp
+        val targetX = slot * currentIndex + (slot - pillWidth) / 2
+        val pillX by animateDpAsState(
+            targetValue = targetX,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow,
+            ),
+            label = "ocarina-navigation-slide",
+        )
+        // This pill persists while the icons change, so it visibly glides between tabs.
+        Box(Modifier.offset(x = pillX, y = 8.dp).size(pillWidth, 41.dp)
+            .clip(RoundedCornerShape(22.dp)).background(c.softAccent))
+        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            tabs.forEachIndexed { idx, tab ->
+                val active = currentIndex == idx
+                val tint by animateColorAsState(
+                    targetValue = if (active) c.accent else c.muted,
+                    animationSpec = tween(155), label = "ocarina-nav-tint-$tab",
+                )
+                val interaction = remember(tab) { MutableInteractionSource() }
+                Box(Modifier.weight(1f).fillMaxHeight()
+                    .clickable(interactionSource = interaction, indication = null) {
+                        if (!active) onSelect(tab)
+                    }, contentAlignment = Alignment.Center) {
                     if (tab == "PROFILE") Box(Modifier.size(29.dp).clip(CircleShape)
-                        .border(if (active) 2.dp else 0.dp, c.accent, CircleShape),
+                        .border(if (active) 2.dp else 0.dp, tint, CircleShape),
                         contentAlignment = Alignment.Center) {
                         OcarinaV5Avatar(account.avatarBase64, account.user?.photoUrl?.toString(), 26.dp)
-                    } else VI(icons[idx], tab, Modifier.size(24.dp), if (active) c.accent else c.muted)
+                    } else VI(icons[idx], tab, Modifier.size(24.dp), tint)
                 }
             }
         }
