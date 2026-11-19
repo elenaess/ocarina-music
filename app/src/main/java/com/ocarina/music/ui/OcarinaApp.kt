@@ -55,6 +55,8 @@ import com.ocarina.music.R
 import com.composables.icons.lucide.R as LucideR
 import com.ocarina.music.data.CatalogEntry
 import com.ocarina.music.data.CatalogKind
+import com.ocarina.music.data.OcarinaDirectory
+import com.ocarina.music.data.OcarinaPublicProfile
 import com.ocarina.music.data.OcarinaOfflineStore
 import com.ocarina.music.data.OcarinaPlaylist
 import com.ocarina.music.data.OcarinaPlaylistStore
@@ -73,7 +75,7 @@ import java.util.Locale
 
 private enum class Screen {
     HOME, SEARCH, LIBRARY, LIKED, PROFILE, PLAYLISTS, PLAYLIST_DETAIL,
-    ARTISTS, ALBUMS, CATALOG_DETAIL, DOWNLOADS
+    ARTISTS, ALBUMS, CATALOG_DETAIL, DOWNLOADS, PROFILE_EDIT, PUBLIC_PROFILE
 }
 
 /** Every interface icon is a Lucide vector resource. The brand mark is its own vector. */
@@ -108,9 +110,10 @@ fun OcarinaApp() {
         val searchClient = remember { YouTubeMusicSearch() }
         val store = remember(context) { FavoritesStore(context) }
         val account = remember(context) { OcarinaAccount(context) }
+        val directory = remember(account) { OcarinaDirectory() }
         DisposableEffect(account) { onDispose { account.close() } }
         val favorites = remember { mutableStateListOf<Song>().apply { addAll(store.load()) } }
-        val recent = remember { mutableStateListOf<Song>().apply { addAll(settings.recentlyPlayed()) } }
+        val recent = remember { mutableStateListOf<Song>() }
         val playback = remember(context) { PlaybackConnector(context) }
         DisposableEffect(playback) { onDispose { playback.close() } }
         var screen by remember { mutableStateOf(Screen.HOME) }
@@ -118,6 +121,9 @@ fun OcarinaApp() {
         var searchText by remember { mutableStateOf("") }
         var discoverSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
         var searchSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
+        var publicProfiles by remember { mutableStateOf<List<OcarinaPublicProfile>>(emptyList()) }
+        var profileSearchLoading by remember { mutableStateOf(false) }
+        var selectedPublicProfile by remember { mutableStateOf<OcarinaPublicProfile?>(null) }
         var discoveryLoading by remember { mutableStateOf(true) }
         var searchLoading by remember { mutableStateOf(false) }
         var discoverError by remember { mutableStateOf<String?>(null) }
@@ -225,6 +231,9 @@ fun OcarinaApp() {
                     Screen.ARTISTS else Screen.ALBUMS
                 screen == Screen.PLAYLISTS || screen == Screen.ARTISTS ||
                     screen == Screen.ALBUMS || screen == Screen.DOWNLOADS -> screen = Screen.LIBRARY
+                screen == Screen.PROFILE_EDIT -> screen = Screen.PROFILE
+                screen == Screen.PUBLIC_PROFILE -> screen = Screen.SEARCH
+                screen == Screen.SEARCH && searchText.isNotBlank() -> searchText = ""
                 screen == Screen.PROFILE -> screen = previousScreen
                 screen != Screen.HOME -> screen = Screen.HOME
             }
@@ -233,10 +242,18 @@ fun OcarinaApp() {
             addToPlaylist != null || screen != Screen.HOME) { goBack() }
         // Keep guest favourites local; cloud favourites are scoped to each signed-in user.
         LaunchedEffect(account.user?.uid) {
+            if (account.user == null) {
+                playback.resetForLogout()
+                showFullPlayer = false
+                queue = emptyList()
+                screen = Screen.HOME
+            }
             syncedAccount = null
             favorites.clear()
             favorites.addAll(store.load(account.user?.uid))
             playlists = playlistStore.load(account.user?.uid)
+            recent.clear()
+            recent.addAll(settings.recentlyPlayed(account.user?.uid))
         }
         LaunchedEffect(account.user?.uid, account.favoritesReady, account.cloudFavorites) {
             val uid = account.user?.uid ?: return@LaunchedEffect
@@ -280,7 +297,7 @@ fun OcarinaApp() {
             recent.removeAll { it.videoId == song.videoId }
             recent.add(0, song)
             if (recent.size > 12) recent.removeAt(recent.lastIndex)
-            settings.addRecent(song)
+            settings.addRecent(song, account.user?.uid)
             showFullPlayer = true
         }
         fun next() {
@@ -294,7 +311,8 @@ fun OcarinaApp() {
             queue.getOrNull(i - 1)?.let { playback.play(it, queue.getOrNull(i)) }
         }
 
-        LaunchedEffect(discoverRefresh) {
+        LaunchedEffect(discoverRefresh, account.user?.uid) {
+            if (account.user == null) return@LaunchedEffect
             discoveryLoading = true
             discoverError = null
             try { discoverSongs = searchClient.search("música brasileira contemporânea") }
@@ -302,18 +320,37 @@ fun OcarinaApp() {
             catch (e: Exception) { discoverError = e.message ?: "Não foi possível consultar o catálogo." }
             finally { discoveryLoading = false }
         }
-        LaunchedEffect(searchText, searchRefresh) {
+        LaunchedEffect(searchText, searchRefresh, account.user?.uid) {
             val query = searchText.trim()
-            if (query.isBlank()) { searchSongs = emptyList(); searchError = null; searchLoading = false; return@LaunchedEffect }
-            delay(260)
+            if (query.isBlank() || account.user == null) {
+                searchSongs = emptyList(); searchError = null; searchLoading = false
+                return@LaunchedEffect
+            }
             searchLoading = true
             searchError = null
+            searchSongs = emptyList()
+            delay(360)
             try { searchSongs = searchClient.search(query) }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { searchSongs = emptyList(); searchError = e.message ?: "Não foi possível buscar." }
             finally { searchLoading = false }
         }
 
+        // Authenticated public-profile search; only opt-in profiles are discoverable.
+        LaunchedEffect(searchText, account.user?.uid) {
+            val query = searchText.trim()
+            if (query.length < 2 || account.user == null) {
+                publicProfiles = emptyList()
+                profileSearchLoading = false
+                return@LaunchedEffect
+            }
+            delay(380)
+            profileSearchLoading = true
+            try { publicProfiles = directory.search(query) }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { publicProfiles = emptyList() }
+            finally { profileSearchLoading = false }
+        }
         LaunchedEffect(screen, catalogQuery) {
             if (screen != Screen.ARTISTS && screen != Screen.ALBUMS) return@LaunchedEffect
             val query = catalogQuery.trim()
@@ -355,16 +392,27 @@ fun OcarinaApp() {
                 if (candidate != null) playback.play(candidate)
             }
         }
+        if (!account.authReady) {
+            Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center) {
+                OcarinaMark(Modifier.size(86.dp), c.accent)
+                Spacer(Modifier.height(22.dp))
+                CircularProgressIndicator(Modifier.size(23.dp), color = c.accent, strokeWidth = 2.dp)
+            }
+        } else if (account.user == null) {
+            OcarinaV5Login(account)
+        } else {
         Box(Modifier.fillMaxSize()) {
         if (!showFullPlayer || playback.currentSong == null) {
         Scaffold(
             containerColor = c.background,
             topBar = {
-                AppHeader(
-                    screen = screen,
+                OcarinaV5Header(
+                    screen = screen.name, account = account,
                     onProfile = ::openProfile,
                     onBack = ::goBack,
                     onSearch = { screen = Screen.SEARCH },
+                    onCreate = { creatingPlaylist = true },
                 )
             },
             bottomBar = {
@@ -372,44 +420,62 @@ fun OcarinaApp() {
                     playback.currentSong?.let { song ->
                         MiniPlayer(song, playback, onExpand = { showFullPlayer = true })
                     }
-                    FastNav(screen = screen, onSelect = { screen = it })
+                    OcarinaV5Nav(selected = screen.name, account = account,
+                        onSelect = { tab ->
+                            if (tab == "PROFILE" && screen != Screen.PROFILE) previousScreen = screen
+                            screen = when (tab) {
+                                "SEARCH" -> Screen.SEARCH
+                                "LIBRARY" -> Screen.LIBRARY
+                                "PROFILE" -> Screen.PROFILE
+                                else -> Screen.HOME
+                            }
+                        })
                 }
             },
         ) { insets ->
             Box(Modifier.fillMaxSize().padding(insets)) {
                 when (screen) {
-                    Screen.HOME -> HomePage(
-                        listState = homeScroll,
-                        songs = discoverSongs, recent = recent, favorites = favorites,
-                        playlists = playlists, onOpenPlaylist = {
+                    Screen.HOME -> OcarinaV5Home(
+                        listState = homeScroll, playlists = playlists,
+                        discoveries = discoverSongs, recent = recent, favorites = favorites,
+                        loading = discoveryLoading, onRetry = { discoverRefresh++ },
+                        onOpenPlaylist = {
                             selectedPlaylistId = it.id
                             playlistReturnScreen = Screen.HOME
                             screen = Screen.PLAYLIST_DETAIL
                         },
-                        loading = discoveryLoading, error = discoverError,
-                        onRetry = { discoverRefresh++ },
-                        onPlay = { song, source -> playSong(song, source) },
-                        onFavorite = ::toggleFavorite,
-                        onSearch = { screen = Screen.SEARCH },
-                        onLibrary = { screen = Screen.LIBRARY },
-                        onQueue = ::addToQueue, onPlaylist = { addToPlaylist = it }, onShare = ::shareSong,
+                        onOpenLibrary = { screen = Screen.LIBRARY }, onSearch = { screen = Screen.SEARCH },
+                        onPlay = ::playSong, onLike = ::toggleFavorite,
+                        onQueue = ::addToQueue, onPlaylist = { addToPlaylist = it },
+                        onShare = ::shareSong,
                     )
-                    Screen.SEARCH -> SearchPage(
+                    Screen.SEARCH -> OcarinaV5Search(
                         listState = searchScroll,
-                        text = searchText, onText = { searchText = it }, songs = searchSongs,
-                        favorites = favorites, loading = searchLoading, error = searchError,
-                        onRetry = { searchRefresh++ },
-                        onPlay = { song -> playSong(song, searchSongs) }, onFavorite = ::toggleFavorite,
-                        onQueue = ::addToQueue, onPlaylist = { addToPlaylist = it }, onShare = ::shareSong,
+                        query = searchText, onQuery = { searchText = it },
+                        songs = searchSongs, recommendations = discoverSongs,
+                        profiles = publicProfiles, favorites = favorites,
+                        loading = searchLoading, profilesLoading = profileSearchLoading,
+                        error = searchError, onRetry = { searchRefresh++ },
+                        onPlay = { song -> playSong(song, searchSongs) }, onLike = ::toggleFavorite,
+                        onQueue = ::addToQueue, onPlaylist = { addToPlaylist = it },
+                        onShare = ::shareSong,
+                        onProfile = { profile -> selectedPublicProfile = profile; screen = Screen.PUBLIC_PROFILE },
                     )
-                    Screen.LIBRARY -> LibraryPage(
-                        listState = libraryScroll,
-                        favorites = favorites, recent = recent,
-                        onLiked = { screen = Screen.LIKED }, onPlay = { song -> playSong(song, recent) },
-                        onFavorite = ::toggleFavorite, onSearch = { screen = Screen.SEARCH },
-                        onPlaylists = { screen = Screen.PLAYLISTS }, onDownloads = { screen = Screen.DOWNLOADS },
-                        onArtists = { openCatalog(CatalogKind.ARTIST) }, onAlbums = { openCatalog(CatalogKind.ALBUM) },
-                        onQueue = ::addToQueue, onPlaylist = { addToPlaylist = it }, onShare = ::shareSong,
+                    Screen.LIBRARY -> OcarinaV5Library(
+                        listState = libraryScroll, playlists = playlists, favorites = favorites,
+                        recent = recent, onOpenPlaylist = {
+                            selectedPlaylistId = it.id
+                            playlistReturnScreen = Screen.LIBRARY
+                            screen = Screen.PLAYLIST_DETAIL
+                        },
+                        onPlaylists = { screen = Screen.PLAYLISTS },
+                        onLiked = { screen = Screen.LIKED },
+                        onArtists = { openCatalog(CatalogKind.ARTIST) },
+                        onAlbums = { openCatalog(CatalogKind.ALBUM) },
+                        onDownloads = { screen = Screen.DOWNLOADS },
+                        onPlay = { song -> playSong(song, recent) },
+                        onLike = ::toggleFavorite, onQueue = ::addToQueue,
+                        onPlaylist = { addToPlaylist = it }, onShare = ::shareSong,
                     )
                     Screen.LIKED -> LikedPage(
                         listState = likedScroll,
@@ -417,16 +483,30 @@ fun OcarinaApp() {
                         onFavorite = ::toggleFavorite, onExplore = { screen = Screen.SEARCH },
                         onQueue = ::addToQueue, onPlaylist = { addToPlaylist = it }, onShare = ::shareSong,
                     )
-                    Screen.PROFILE -> ProfilePage(
-                        account = account, isDark = dark, favorites = favorites.size, recent = recent.size,
-                        onTheme = { value -> dark = value; settings.setDark(value) },
-                        onInfo = { showInfo = true }, onLiked = { screen = Screen.LIKED },
-                        playlistCount = playlists.size, onPlaylists = { screen = Screen.PLAYLISTS },
+                    Screen.PROFILE -> OcarinaV5ProfileView(
+                        account = account, favorites = favorites.size, recent = recent.size,
+                        playlists = playlists,
+                        onEdit = { screen = Screen.PROFILE_EDIT },
+                        onLiked = { screen = Screen.LIKED },
+                        onOpenPlaylist = {
+                            selectedPlaylistId = it.id
+                            playlistReturnScreen = Screen.PROFILE
+                            screen = Screen.PLAYLIST_DETAIL
+                        },
                         onShare = {
-                            shareText("Compartilhar perfil",
-                                "Perfil Ocarina: ${account.displayName.ifBlank { account.user?.displayName ?: "Usuário" }}")
+                            shareText("Compartilhar perfil", "Perfil Ocarina: " +
+                                account.displayName.ifBlank { account.user?.displayName ?: "Usuário" })
                         },
                     )
+                    Screen.PROFILE_EDIT -> OcarinaV5ProfileEdit(
+                        account, dark,
+                        onDark = { dark = it; settings.setDark(it) },
+                        onBack = { screen = Screen.PROFILE },
+                    )
+                    Screen.PUBLIC_PROFILE -> selectedPublicProfile?.let { profile ->
+                        OcarinaV5PublicProfile(profile,
+                            onShare = { shareText("Compartilhar perfil", "Ocarina: ${profile.displayName}") })
+                    }
                     Screen.PLAYLISTS -> OcarinaPlaylistsPage(playlists,
                         onCreate = { creatingPlaylist = true },
                         onOpen = {
@@ -547,10 +627,11 @@ fun OcarinaApp() {
             AlertDialog(
                 onDismissRequest = { showInfo = false },
                 title = { Text("Ocarina") },
-                text = { Text("Versão 0.4.3. Contas Google e e-mail pelo Firebase, foto e favoritos no Firestore. Psiu ainda não está integrado. Reprodução experimental via fontes externas.") },
+                text = { Text("Versão 0.5.0. Contas Google e e-mail pelo Firebase, foto e favoritos no Firestore. Psiu ainda não está integrado. Reprodução experimental via fontes externas.") },
                 confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Entendi") } },
             )
         }
+        } // authenticated content
     }
 }
 
@@ -912,207 +993,6 @@ private fun LikedPage(listState: LazyListState, favorites: List<Song>, onPlay: (
 }
 
 @Composable
-private fun ProfilePage(account: OcarinaAccount, isDark: Boolean, favorites: Int, recent: Int,
-    onTheme: (Boolean) -> Unit, onInfo: () -> Unit, onLiked: () -> Unit,
-    playlistCount: Int, onPlaylists: () -> Unit, onShare: () -> Unit) {
-    val c = ocarinaColors
-    val activity = LocalContext.current as? Activity
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var registering by remember { mutableStateOf(false) }
-    var nameInput by remember(account.user?.uid, account.displayName) { mutableStateOf(account.displayName) }
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) account.uploadAvatar(uri)
-    }
-    val avatarBitmap = remember(account.avatarBase64) {
-        runCatching {
-            if (account.avatarBase64.isBlank()) null else {
-                val data = Base64.decode(account.avatarBase64, Base64.DEFAULT)
-                BitmapFactory.decodeByteArray(data, 0, data.size)?.asImageBitmap()
-            }
-        }.getOrNull()
-    }
-    LazyColumn(
-        Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 21.dp, end = 21.dp, top = 14.dp, bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
-    ) {
-        item {
-            Column {
-                Column(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(27.dp))
-                        .background(c.surface).padding(horizontal = 21.dp, vertical = 25.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Box(Modifier.size(112.dp).clip(CircleShape).background(c.softAccent)
-                        .padding(5.dp).clip(CircleShape).background(c.elevated),
-                        contentAlignment = Alignment.Center) {
-                        if (avatarBitmap != null) Image(
-                            bitmap = avatarBitmap, contentDescription = "Sua foto de perfil",
-                            contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                        else if (account.user?.photoUrl != null) AsyncImage(
-                            model = account.user?.photoUrl,
-                            contentDescription = "Foto da conta Google",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                            error = painterResource(LucideR.drawable.lucide_ic_user_round),
-                        )
-                        else LIcon(LucideR.drawable.lucide_ic_user_round, "Avatar", Modifier.size(47.dp), c.accent)
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    if (account.user == null) {
-                        Text("Entrar no Ocarina", color = c.text, fontSize = 23.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Sincronize suas curtidas e sua foto", color = c.muted, fontSize = 12.sp)
-                        Spacer(Modifier.height(17.dp))
-                        OutlinedButton(
-                            onClick = { activity?.let { account.signInWithGoogle(it) } },
-                            enabled = !account.busy && activity != null,
-                            modifier = Modifier.fillMaxWidth().height(52.dp),
-                            shape = RoundedCornerShape(13.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(containerColor = c.surface),
-                            border = BorderStroke(1.dp, c.outline),
-                        ) {
-                            Image(painter = painterResource(R.drawable.google_g),
-                                contentDescription = null, modifier = Modifier.size(22.dp))
-                            Spacer(Modifier.width(11.dp))
-                            Text("Continuar com Google", color = c.text, fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold)
-                        }
-                        Spacer(Modifier.height(13.dp))
-                        Text("ou entre com e-mail", color = c.muted, fontSize = 12.sp)
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = email, onValueChange = { email = it }, singleLine = true,
-                            label = { Text("E-mail") }, modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(13.dp),
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = password, onValueChange = { password = it }, singleLine = true,
-                            label = { Text("Senha") }, visualTransformation = PasswordVisualTransformation(),
-                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp),
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Button(
-                            onClick = { if (registering) account.register(email, password) else account.signIn(email, password) },
-                            enabled = !account.busy, modifier = Modifier.fillMaxWidth(),
-                        ) { Text(if (registering) "Criar conta" else "Entrar") }
-                        TextButton(onClick = { registering = !registering; account.clearMessage() }) {
-                            Text(if (registering) "Já tenho uma conta" else "Criar uma conta")
-                        }
-                    } else {
-                        Text(account.displayName.ifBlank { "Seu espaço" }, color = c.text,
-                            fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
-                        Text(account.user?.email.orEmpty(), color = c.muted, fontSize = 12.sp)
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedButton(onClick = onShare, shape = RoundedCornerShape(14.dp)) {
-                            LIcon(LucideR.drawable.lucide_ic_share_2, null, Modifier.size(17.dp), c.accent)
-                            Spacer(Modifier.width(7.dp))
-                            Text("Compartilhar perfil")
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedButton(onClick = { imagePicker.launch("image/*") }, enabled = !account.busy) {
-                            LIcon(LucideR.drawable.lucide_ic_user_round, null, Modifier.size(17.dp), c.accent)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Alterar foto")
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        OutlinedTextField(
-                            value = nameInput, onValueChange = { nameInput = it.take(50) },
-                            label = { Text("Nome do perfil") }, singleLine = true,
-                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp),
-                        )
-                        TextButton(onClick = { account.updateName(nameInput) }, enabled = !account.busy) {
-                            Text("Salvar nome")
-                        }
-                        TextButton(onClick = { account.logout() }) { Text("Sair da conta") }
-                    }
-                    if (account.busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp))
-                    if (account.message != null) {
-                        Spacer(Modifier.height(9.dp))
-                        Text(account.message.orEmpty(), color = c.accent, fontSize = 12.sp)
-                    }
-                    Spacer(Modifier.height(17.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        ProfileStat(favorites.toString(), "Curtidas")
-                        Box(Modifier.width(1.dp).height(37.dp).background(c.outline))
-                        ProfileStat(recent.toString(), "Recentes")
-                        Box(Modifier.width(1.dp).height(37.dp).background(c.outline))
-                        ProfileStat(playlistCount.toString(), "Playlists")
-                    }
-                }
-            }
-        }
-        item {
-            Surface(onClick = onPlaylists, shape = RoundedCornerShape(21.dp), color = c.surface) {
-                Row(Modifier.fillMaxWidth().padding(17.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(c.softAccent),
-                        contentAlignment = Alignment.Center) {
-                        LIcon(LucideR.drawable.lucide_ic_list_music, null, Modifier.size(25.dp), c.accent)
-                    }
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Minhas playlists", color = c.text, fontWeight = FontWeight.SemiBold)
-                        Text("${playlistCount} listas criadas", color = c.muted, fontSize = 12.sp)
-                    }
-                    LIcon(LucideR.drawable.lucide_ic_chevron_right, "Abrir", Modifier.size(20.dp), c.muted)
-                }
-            }
-        }
-        item {
-            Column {
-                SectionHeader("Preferências")
-                Spacer(Modifier.height(7.dp))
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface).padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    LIcon(if (isDark) LucideR.drawable.lucide_ic_moon else LucideR.drawable.lucide_ic_sun,
-                        null, Modifier.size(24.dp), c.accent)
-                    Spacer(Modifier.width(13.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Modo escuro", fontSize = 15.sp, color = c.text, fontWeight = FontWeight.SemiBold)
-                        Text("Altere o tema instantaneamente", fontSize = 11.sp, color = c.muted)
-                    }
-                    Switch(checked = isDark, onCheckedChange = onTheme)
-                }
-                Spacer(Modifier.height(10.dp))
-                Surface(onClick = onLiked, shape = RoundedCornerShape(18.dp), color = c.surface) {
-                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        LIcon(LucideR.drawable.lucide_ic_heart, null, Modifier.size(23.dp), c.accent)
-                        Spacer(Modifier.width(13.dp))
-                        Text("Minhas curtidas", modifier = Modifier.weight(1f), color = c.text, fontSize = 15.sp)
-                        LIcon(LucideR.drawable.lucide_ic_chevron_right, null, Modifier.size(19.dp), c.muted)
-                    }
-                }
-            }
-        }
-        item {
-            Column {
-                SectionHeader("Conexões")
-                Spacer(Modifier.height(7.dp))
-                Surface(onClick = onInfo, shape = RoundedCornerShape(18.dp), color = c.surface) {
-                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        LIcon(LucideR.drawable.lucide_ic_cloud, null, Modifier.size(22.dp), c.accent)
-                        Spacer(Modifier.width(13.dp))
-                        Column {
-                            Text("Integração com Psiu", fontWeight = FontWeight.SemiBold, color = c.text)
-                            Text("Planejada para uma versão futura", color = c.muted, fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProfileStat(value: String, caption: String) {
-    val c = ocarinaColors
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = c.text)
-        Text(caption, fontSize = 11.sp, color = c.muted)
-    }
-}
-
-@Composable
 private fun SongRow(song: Song, isFavorite: Boolean, onOpen: () -> Unit, onFavorite: () -> Unit,
     onQueue: (() -> Unit)? = null, onPlaylist: (() -> Unit)? = null, onShare: (() -> Unit)? = null) {
     val c = ocarinaColors
@@ -1260,13 +1140,8 @@ private fun NativePlayerScreen(
             }
             Spacer(Modifier.weight(0.5f))
             BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                val coverSize = minOf(maxWidth, 365.dp)
-                if (song.artwork.isNotBlank()) AlbumArtwork(song, "Capa de ${song.title}", highQuality = true,
-                    modifier = Modifier.size(coverSize).clip(RoundedCornerShape(23.dp)).background(c.artworkSurface))
-                else Box(Modifier.size(coverSize).clip(RoundedCornerShape(23.dp)).background(c.artworkSurface),
-                    contentAlignment = Alignment.Center) {
-                    LIcon(LucideR.drawable.lucide_ic_music_2, "Áudio local", Modifier.size(86.dp), c.accent)
-                }
+                val discSize = minOf(maxWidth * 0.91f, 350.dp)
+                OcarinaV5Disc(song, discSize)
             }
             Spacer(Modifier.weight(0.65f))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

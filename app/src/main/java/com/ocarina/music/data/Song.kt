@@ -6,4 +6,5 @@ data class Song(
     val artist: String,
     val artwork: String,
     val album: String = "",
+    val category: String = "music", // music, video, podcast, live
 )

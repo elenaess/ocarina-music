@@ -1,4 +1,28 @@
-# Ocarina 0.4.1
+# Ocarina v0.5.0 — redesign (código fonte)
+
+- Login obrigatório na entrada, Google/E-mail; Firebase continua em `com.ocarina.app`.
+- Home personalizada com chips, playlists e recomendações.
+- Busca visual com categorias; músicas antes de vídeos quando a fonte traz essa classificação.
+- Biblioteca em listas, navbar com avatar, perfil em modo visualização e edição separada.
+- Diretório de perfis públicos **opt-in**, sem expor e-mail, favoritos ou histórico privado.
+- Player em estilo CD; o motor Media3 e o mecanismo de áudio da v0.4.3 foram preservados.
+- Ícone grafite com rosa em degradê.
+
+**Antes de testar perfis públicos:** atualize as regras do Firestore com `firestore.rules`.
+A busca por perfis usa um prefixo do nome. Só aparecem contas que tenham ativado a opção
+**Aparecer na busca** em Editar perfil. A foto pública só é enviada com essa escolha.
+
+**Limitações honestas:** a classificação das faixas depende de marcadores do catálogo não oficial
+YouTube Music; podcasts, transmissões ao vivo e vídeos nem sempre vêm identificados pela fonte.
+O app não baixa áudio do YouTube. Downloads são arquivos próprios importados pelo usuário.
+Este ZIP contém o código, não um APK compilado. Consulte `TEST_REPORT_v0.5.0.txt`.
+
+**Termux:** use o seletor nativo para importar o ZIP e execute `push-to-github.sh`.
+**Assinatura:** o workflow preserva a chave estável configurada anteriormente.
+
+---
+
+# Ocarina 0.5.0
 
 Aplicativo Android experimental com player nativo, busca musical, modos claro/escuro e agora conta Firebase.
 

@@ -12,8 +12,8 @@ android {
         applicationId = "com.ocarina.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.4.3"
+        versionCode = 13
+        versionName = "0.5.0"
     }
     val ciKeyStoreFile = System.getenv("OCARINA_SIGNING_STORE_FILE")?.takeIf { it.isNotBlank() && file(it).isFile }
     signingConfigs {

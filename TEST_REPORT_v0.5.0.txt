@@ -1,0 +1,18 @@
+OCARINA 0.5.0 — TEST REPORT
+Data: 2026-11-19
+
+PASS — 19 verificações estruturais de código, recursos, metadados e segurança
+       Comando: python tools/verify_v050.py
+PASS — AndroidManifest.xml e XML do ícone adaptativo analisados
+PASS — novo ícone em PNG 432x432, versão 13 / 0.5.0, pacote com.ocarina.app
+PASS — Lucide: todos os recursos referenciados pelas novas telas já existiam nas telas/base da v0.4.3
+PASS — Conferência de navegação, conta obrigatória, separação de perfil, busca por tipo,
+       perfil opt-in, histórico separado por conta e Media3 preservado
+PASS — Kotlin CLI foi executado sobre as fontes: sem diagnósticos de sintaxe
+LIMITAÇÃO — Kotlin CLI sem dependências Android/Compose: milhares de referências não
+            resolvidas, não sendo validação de tipos nem compilação Gradle
+NÃO EXECUTADO — Compilação Gradle/Android, instrumentação, teste de login em dispositivo,
+               throughput de scroll e testes de streaming
+NÃO EXECUTADO — Atualização direta no GitHub (conector GitHub não permite gravar)
+AÇÃO NECESSÁRIA — Publicar novas regras Firestore (public_profiles e bio)
+AÇÃO NECESSÁRIA — Enviar a atualização pelo Termux; obter APK apenas se Actions ficar verde

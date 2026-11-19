@@ -204,6 +204,22 @@ class PlaybackConnector(context: Context) {
         }
     }
 
+    /** Release the former account's playback when authentication ends. */
+    fun resetForLogout() {
+        playSerial++
+        resolving?.cancel()
+        resolvingAudio = false
+        currentSong = null
+        playing = false
+        buffering = false
+        positionMs = 0L
+        durationMs = 0L
+        sourceBitrateKbps = 0L
+        error = null
+        controller?.stop()
+        controller?.clearMediaItems()
+    }
+
     fun retryCurrent() {
         currentSong?.let { song -> play(song, refresh = true) }
     }

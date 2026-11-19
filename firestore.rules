@@ -8,11 +8,13 @@ service cloud.firestore {
       // Profiles (including small avatar) are private until we add social profiles.
       allow read: if owns(uid);
       allow create, update: if owns(uid)
-        && request.resource.data.keys().hasOnly(['displayName', 'avatarBase64', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['displayName', 'avatarBase64', 'bio', 'updatedAt'])
         && request.resource.data.get('displayName', '') is string
         && request.resource.data.get('displayName', '').size() <= 50
         && request.resource.data.get('avatarBase64', '') is string
-        && request.resource.data.get('avatarBase64', '').size() <= 85000;
+        && request.resource.data.get('avatarBase64', '').size() <= 85000
+        && request.resource.data.get('bio', '') is string
+        && request.resource.data.get('bio', '').size() <= 140;
       allow delete: if false;
 
       match /favorites/{videoId} {
@@ -26,6 +28,24 @@ service cloud.firestore {
           && request.resource.data.artwork is string && request.resource.data.artwork.size() <= 800;
         allow delete: if owns(uid);
       }
+    }
+    // Users can opt into search. Private user docs and favorites are not shared.
+    match /public_profiles/{uid} {
+      allow read: if request.auth != null;
+      allow create, update: if owns(uid)
+        && request.resource.data.keys().hasOnly(['displayName', 'searchName', 'bio', 'photoUrl', 'avatarBase64'])
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() > 0
+        && request.resource.data.displayName.size() <= 50
+        && request.resource.data.searchName is string
+        && request.resource.data.searchName.size() <= 50
+        && request.resource.data.bio is string
+        && request.resource.data.bio.size() <= 140
+        && request.resource.data.photoUrl is string
+        && request.resource.data.photoUrl.size() <= 1000
+        && request.resource.data.avatarBase64 is string
+        && request.resource.data.avatarBase64.size() <= 25000;
+      allow delete: if owns(uid);
     }
   }
 }

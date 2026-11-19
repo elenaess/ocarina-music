@@ -78,7 +78,9 @@ class YouTubeMusicSearch {
         }
         val songs = extractSongs(data)
         synchronized(searchCache) { searchCache[cacheKey] = System.currentTimeMillis() to songs }
-        songs
+        songs.sortedWith(compareBy<Song> { when (it.category) {
+            "music" -> 0; "video" -> 1; "podcast" -> 2; "live" -> 3; else -> 4
+        } }.thenBy { it.title })
     }
 
     private fun readPublicClientConfig(): Pair<String?, String> {
@@ -158,7 +160,17 @@ class YouTubeMusicSearch {
         val image = thumbs?.optJSONObject((thumbs.length() - 1).coerceAtLeast(0))
             ?.optString("url")?.takeIf { it.startsWith("https://") }
             ?: "https://i.ytimg.com/vi/$id/hqdefault.jpg"
-        return Song(id, title, artist, image)
+        // Source-provided type markers, not guesses based on the song title.
+        val typeMarkers = (0 until (artistRuns?.length() ?: 0))
+            .mapNotNull { artistRuns?.optJSONObject(it)?.optString("text") }
+            .map { it.trim().lowercase(java.util.Locale.ROOT) }
+        val category = when {
+            typeMarkers.any { it == "podcast" || it == "podcasts" } -> "podcast"
+            typeMarkers.any { it == "ao vivo" || it == "live" || it == "live stream" } -> "live"
+            typeMarkers.any { it == "vídeo" || it == "video" || it == "videos" } -> "video"
+            else -> "music"
+        }
+        return Song(id, title, artist, image, category = category)
     }
 
     private fun findWatchId(value: Any?, depth: Int = 0): String? {

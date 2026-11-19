@@ -1,19 +1,28 @@
-# Importar o ZIP no Termux, sem adivinhar o nome
+# Ocarina v0.5.0 no Termux
 
-O ChatGPT para Android pode guardar o arquivo numa área interna do próprio aplicativo, invisível ao Termux. Nessa situação, `find` não resolve. Abra esta conversa no navegador do Android, toque no link do ZIP e escolha **Baixar**; depois confirme em **Arquivos → Armazenamento interno → Download**. Se for salvo em outra pasta, mova para **Download** no gerenciador de arquivos.
-
-Depois de confirmar no app Arquivos, execute:
+1. Faça o download do ZIP no Android. Se o arquivo aparece no aplicativo Arquivos, mas
+não em `/sdcard/Download`, use o seletor de documentos do Termux em vez de `find`.
 
 ```bash
-pkg install -y git gh unzip openjdk-17 openssl coreutils
-termux-setup-storage
-ZIP=$(find /sdcard/Download /sdcard/Documents -type f -iname '*ocarina*v0.4.3*.zip' -print -quit 2>/dev/null)
-if [ -z "$ZIP" ]; then echo 'O arquivo ainda não está em /sdcard/Download. Mova pelo app Arquivos.'; exit 1; fi
-unzip -oq "$ZIP" -d "$HOME"
-grep versionName "$HOME/ocarina-music/app/build.gradle.kts"
-gh auth status || gh auth login
-gh auth setup-git
-bash "$HOME/ocarina-music/push-to-github.sh"
+pkg install -y termux-api unzip git gh
+termux-storage-get "$HOME/ocarina-v050.zip"
 ```
 
-**Não execute o script de assinatura novamente se o login Google já está funcionando.** A compilação reutiliza a chave estável dos segredos atuais do GitHub.
+Selecione **Ocarina-v0.5.0-Redesign.zip** no seletor. O recurso pode exigir o app
+complementar Termux:API, além do pacote `termux-api` do Termux.
+
+2. Extraia e envie:
+
+```bash
+mkdir -p "$HOME/ocarina-v050"
+unzip -tq "$HOME/ocarina-v050.zip" && unzip -oq "$HOME/ocarina-v050.zip" -d "$HOME/ocarina-v050"
+bash "$HOME/ocarina-v050/ocarina-music/push-to-github.sh"
+```
+
+3. Abra https://github.com/elenaess/ocarina-music/actions e verifique a compilação;
+APKs só existem se o workflow concluir com sucesso.
+
+4. No Firebase Console / Firestore / Rules, substitua as regras atuais pelo conteúdo de
+`firestore.rules` e publique para permitir apenas o diretório opt-in.
+
+**Não atualize o SHA-1** se o APK continuar assinado com a mesma chave estável do GitHub.

@@ -46,8 +46,15 @@ class OcarinaAccount(private val context: Context) {
     private var profileListener: ListenerRegistration? = null
     private var favoritesListener: ListenerRegistration? = null
 
+    var authReady by mutableStateOf(false)
+        private set
     var user by mutableStateOf<FirebaseUser?>(null)
         private set
+    var bio by mutableStateOf("")
+        private set
+    var isPublic by mutableStateOf(false)
+        private set
+    private var publicListener: ListenerRegistration? = null
     var displayName by mutableStateOf("")
         private set
     var avatarBase64 by mutableStateOf("")
@@ -71,6 +78,7 @@ class OcarinaAccount(private val context: Context) {
         db = FirebaseFirestore.getInstance()
         onAuth = FirebaseAuth.AuthStateListener { firebaseAuth ->
             bindUser(firebaseAuth.currentUser)
+            authReady = true
         }
         auth.addAuthStateListener(onAuth)
     }
@@ -79,10 +87,14 @@ class OcarinaAccount(private val context: Context) {
         if (user?.uid == next?.uid) return
         profileListener?.remove()
         favoritesListener?.remove()
+        publicListener?.remove()
+        publicListener = null
         profileListener = null
         favoritesListener = null
         user = next
         displayName = next?.displayName.orEmpty()
+        bio = ""
+        isPublic = false
         avatarBase64 = ""
         cloudFavorites = emptyList()
         favoritesReady = false
@@ -92,6 +104,10 @@ class OcarinaAccount(private val context: Context) {
             if (err != null) { message = "Perfil indisponível: ${err.localizedMessage}"; return@addSnapshotListener }
             displayName = snapshot?.getString("displayName") ?: next.displayName.orEmpty()
             avatarBase64 = snapshot?.getString("avatarBase64").orEmpty()
+            bio = snapshot?.getString("bio").orEmpty()
+        }
+        publicListener = db.collection("public_profiles").document(uid).addSnapshotListener { snapshot, _ ->
+            if (user?.uid == uid) isPublic = snapshot?.exists() == true
         }
         favoritesListener = db.collection("users").document(uid).collection("favorites")
             .addSnapshotListener { snapshot, err ->
@@ -178,6 +194,59 @@ class OcarinaAccount(private val context: Context) {
             }
     }
 
+    fun updateBio(value: String) {
+        val uid = user?.uid ?: return
+        val clean = value.trim().take(140)
+        db.collection("users").document(uid)
+            .set(mapOf("bio" to clean), SetOptions.merge())
+            .addOnFailureListener { message = "Não foi possível salvar a bio: ${it.localizedMessage}" }
+    }
+
+    /** A very small JPEG for consenting users' public avatars, not the private full thumbnail. */
+    private fun publicAvatar(): String = runCatching {
+        if (avatarBase64.length <= 25000) return@runCatching avatarBase64
+        val bytes = Base64.decode(avatarBase64, Base64.DEFAULT)
+        val original = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: return@runCatching ""
+        val ratio = 96f / maxOf(original.width, original.height).coerceAtLeast(1)
+        val scaled = Bitmap.createScaledBitmap(original,
+            (original.width * ratio).toInt().coerceAtLeast(1),
+            (original.height * ratio).toInt().coerceAtLeast(1), true)
+        val stream = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, 55, stream)
+        original.recycle()
+        if (scaled !== original) scaled.recycle()
+        Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+            .takeIf { it.length <= 25000 }.orEmpty()
+    }.getOrDefault("")
+
+    fun setPublic(enabled: Boolean, nameOverride: String? = null, bioOverride: String? = null) {
+        val uid = user?.uid ?: return
+        busy = true
+        val ref = db.collection("public_profiles").document(uid)
+        if (!enabled) {
+            ref.delete().addOnCompleteListener { task ->
+                busy = false
+                if (!task.isSuccessful) message = "Falha ao ocultar perfil."
+            }
+        } else {
+            val name = nameOverride?.trim()?.takeIf { it.isNotBlank() } ?: displayName.ifBlank { user?.displayName.orEmpty() }.ifBlank { "Usuário Ocarina" }
+                .trim().take(50)
+            // Only publish fields the person chose to expose. Never send e-mail, favorites or UID lists.
+            val photo = user?.photoUrl?.toString()?.take(1000).orEmpty()
+            ref.set(mapOf(
+                "displayName" to name,
+                "searchName" to name.lowercase(java.util.Locale.ROOT),
+                "bio" to (bioOverride ?: bio).trim().take(140),
+                "photoUrl" to photo,
+                "avatarBase64" to publicAvatar()
+            )).addOnCompleteListener { task ->
+                busy = false
+                if (!task.isSuccessful) message = "Falha ao publicar perfil: ${task.exception?.localizedMessage}"
+            }
+        }
+    }
+
     fun uploadAvatar(uri: Uri) {
         val uid = user?.uid ?: return
         busy = true; message = null
@@ -190,6 +259,7 @@ class OcarinaAccount(private val context: Context) {
                     .addOnCompleteListener { task ->
                         busy = false
                         if (!task.isSuccessful) message = task.exception?.localizedMessage ?: "Não foi possível salvar a foto."
+                        else if (isPublic) setPublic(true)
                     }
             } catch (e: Exception) {
                 busy = false
@@ -242,7 +312,7 @@ class OcarinaAccount(private val context: Context) {
 
     fun close() {
         auth.removeAuthStateListener(onAuth)
-        profileListener?.remove(); favoritesListener?.remove()
+        profileListener?.remove(); favoritesListener?.remove(); publicListener?.remove()
         scope.cancel()
     }
 }
