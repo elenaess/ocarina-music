@@ -317,7 +317,7 @@ fun OcarinaOfflinePage(tracks: List<Song>, busy: Boolean, onImport: () -> Unit,
                 fontSize = 12.sp, color = c.muted)
             Spacer(Modifier.height(15.dp))
             Button(onClick = onImport, enabled = !busy, shape = RoundedCornerShape(15.dp)) {
-                Icon(painterResource(LucideR.drawable.lucide_ic_file_audio), null, Modifier.size(18.dp))
+                Icon(painterResource(LucideR.drawable.lucide_ic_music_2), null, Modifier.size(18.dp))
                 Spacer(Modifier.width(9.dp))
                 Text(if (busy) "Importando..." else "Importar arquivos de áudio")
             }
