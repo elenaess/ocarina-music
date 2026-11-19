@@ -1,0 +1,10 @@
+# Download the ZIP from ChatGPT, then open Termux.
+# Requires the Termux:API companion app for the Android file picker.
+pkg install -y git gh unzip tar termux-api
+gh auth status || gh auth login
+rm -f "$HOME/ocarina-v051.zip"
+termux-storage-get "$HOME/ocarina-v051.zip"
+unzip -tq "$HOME/ocarina-v051.zip" || exit 1
+DIR="$(mktemp -d)"
+unzip -oq "$HOME/ocarina-v051.zip" -d "$DIR"
+bash "$DIR/ocarina-music/push-to-github.sh"

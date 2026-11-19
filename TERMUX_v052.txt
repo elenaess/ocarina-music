@@ -1,0 +1,15 @@
+# IMPORTANT: `pkg install termux-api` is NOT enough to use the Android file picker.
+# Install the Termux:API Android companion application from the SAME source as Termux.
+# See https://github.com/termux/termux-api or F-Droid; approve requested permissions.
+# Use one of these import methods, then execute the upload block below.
+# Method A (after Termux:API is installed):
+# termux-storage-get "$HOME/ocarina-v052.zip"
+# test -s "$HOME/ocarina-v052.zip" || { echo "Picker did not save file. Install Termux:API app or try Method B."; exit 1; }
+# Method B: In Android Files, use Move/Copy to -> Internal storage -> Download.
+# termux-setup-storage
+# cp -i /sdcard/Download/Ocarina-v0.5.2-Icone-Tematico.zip "$HOME/ocarina-v052.zip"
+# After either method:
+# unzip -tq "$HOME/ocarina-v052.zip" || exit 1
+# DIR="$(mktemp -d)"
+# unzip -oq "$HOME/ocarina-v052.zip" -d "$DIR"
+# bash "$DIR/ocarina-music/push-to-github.sh"

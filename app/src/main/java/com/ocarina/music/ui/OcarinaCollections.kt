@@ -361,27 +361,45 @@ fun OcarinaPickPlaylistDialog(playlists: List<OcarinaPlaylist>, song: Song,
 @Composable
 fun OcarinaQueueDialog(queue: List<Song>, currentId: String?, repeat: Int,
     onSelect: (Song) -> Unit, onRemove: (Song) -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss,
-        title = { Text("Fila de escuta") },
+    val c = ocarinaColors
+    AlertDialog(onDismissRequest = onDismiss, shape = RoundedCornerShape(24.dp),
+        containerColor = c.surface,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("Próximas músicas", color = c.text, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                Text("${queue.size} faixas · ${when(repeat) { 1 -> "repetir uma"; 2 -> "repetir todas"; else -> "sem repetição" }}",
+                    color = c.muted, fontSize = 12.sp)
+            }
+        },
         text = {
-            Column {
-                Text("${queue.size} músicas · ${when(repeat) { 1 -> "repetir faixa"; 2 -> "repetir lista"; else -> "sem repetição" }}",
-                    color = ocarinaColors.muted, fontSize = 12.sp)
-                Spacer(Modifier.height(10.dp))
-                LazyColumn(Modifier.heightIn(max = 390.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    items(queue, key = { it.videoId }) { song ->
-                        Row(Modifier.fillMaxWidth().clickable { onSelect(song) }.padding(vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                                color = if (song.videoId == currentId) ocarinaColors.accent else ocarinaColors.text)
-                            IconButton(onClick = { onRemove(song) }) {
-                                CIcon(LucideR.drawable.lucide_ic_x, "Remover", Modifier.size(17.dp))
-                            }
+            if (queue.isEmpty()) Text("A fila está vazia.", color = c.muted)
+            else LazyColumn(Modifier.heightIn(max = 385.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(queue, key = { it.videoId }) { song ->
+                    val current = song.videoId == currentId
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp))
+                        .background(if (current) c.softAccent else c.elevated.copy(alpha = 0.50f))
+                        .clickable { onSelect(song) }.padding(start = 8.dp, top = 6.dp,
+                            end = 2.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(45.dp).clip(RoundedCornerShape(10.dp))
+                            .background(c.artworkSurface), contentAlignment = Alignment.Center) {
+                            AlbumArtwork(song, song.title, Modifier.fillMaxSize(), small = true)
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(song.title, color = if (current) c.accent else c.text,
+                                fontWeight = FontWeight.SemiBold, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+                            Text(song.artist, color = c.muted, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis, fontSize = 11.sp)
+                        }
+                        IconButton(onClick = { onRemove(song) }, modifier = Modifier.size(37.dp)) {
+                            CIcon(LucideR.drawable.lucide_ic_x, "Remover faixa", Modifier.size(18.dp))
                         }
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } })
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Concluir", color = c.accent) } },
+    )
 }

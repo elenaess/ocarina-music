@@ -10,6 +10,14 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateColorAsState
+import kotlinx.coroutines.isActive
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,6 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -75,58 +84,112 @@ fun OcarinaV5Avatar(base64: String, photoUrl: String?, size: Dp = 40.dp) {
 fun OcarinaV5Login(account: OcarinaAccount) {
     val c = ocarinaColors
     val activity = LocalContext.current as? Activity
+    var emailMode by remember { mutableStateOf(false) }
+    var register by remember { mutableStateOf(false) }
+    var showPassword by remember { mutableStateOf(false) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var register by remember { mutableStateOf(false) }
-    LazyColumn(Modifier.fillMaxSize().background(c.background).statusBarsPadding().navigationBarsPadding(),
-        contentPadding = PaddingValues(horizontal = 26.dp, vertical = 30.dp),
-        verticalArrangement = Arrangement.spacedBy(13.dp)) {
+    // Present choices first; keep credentials out of sight until the user chooses e-mail.
+    LazyColumn(
+        Modifier.fillMaxSize().background(c.background).statusBarsPadding().navigationBarsPadding(),
+        contentPadding = PaddingValues(horizontal = 25.dp, vertical = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         item {
-            Spacer(Modifier.height(40.dp))
-            Box(Modifier.size(86.dp).clip(RoundedCornerShape(26.dp))
-                .background(Brush.linearGradient(listOf(c.accent, c.softAccent))),
+            Spacer(Modifier.height(46.dp))
+            Box(Modifier.size(68.dp).clip(RoundedCornerShape(22.dp)).background(c.softAccent),
                 contentAlignment = Alignment.Center) {
-                VI(R.drawable.ocarina_logo, "Ocarina", Modifier.size(55.dp), c.onAccent)
+                VI(R.drawable.ocarina_logo, "Ocarina", Modifier.size(39.dp), c.accent)
             }
-            Spacer(Modifier.height(25.dp))
-            Text("Seu som. Seu mundo.", fontSize = 34.sp, lineHeight = 38.sp,
-                fontWeight = FontWeight.Bold, color = c.text, letterSpacing = (-1.1).sp)
-            Text("Entre para montar suas playlists, descobrir músicas e guardar o que ama.",
-                color = c.muted, fontSize = 14.sp, lineHeight = 21.sp)
             Spacer(Modifier.height(24.dp))
-            Button(onClick = { activity?.let(account::signInWithGoogle) },
-                enabled = !account.busy && activity != null,
-                modifier = Modifier.fillMaxWidth().height(57.dp), shape = RoundedCornerShape(18.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = c.surface, contentColor = c.text)) {
-                Image(painterResource(R.drawable.google_g), null, Modifier.size(23.dp))
+            Text("Seu som. Seu mundo.", modifier = Modifier.fillMaxWidth(),
+                color = c.text, fontSize = 31.sp, lineHeight = 35.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp)
+            Spacer(Modifier.height(5.dp))
+            Text("Ouça, descubra e guarde suas músicas.",
+                modifier = Modifier.fillMaxWidth(), color = c.muted, fontSize = 14.sp)
+            Spacer(Modifier.height(34.dp))
+            OutlinedButton(
+                onClick = { activity?.let(account::signInWithGoogle) },
+                enabled = activity != null && !account.busy,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                shape = RoundedCornerShape(28.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, c.outline),
+                colors = ButtonDefaults.outlinedButtonColors(containerColor = c.surface, contentColor = c.text),
+            ) {
+                Image(painterResource(R.drawable.google_g), null, Modifier.size(21.dp))
                 Spacer(Modifier.width(12.dp))
-                Text("Continuar com Google", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text("Continuar com Google", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             }
-            Spacer(Modifier.height(15.dp))
-            Text("ou use seu e-mail", color = c.muted, fontSize = 12.sp)
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(email, { email = it.take(200) },
-                modifier = Modifier.fillMaxWidth(), singleLine = true,
-                label = { Text("E-mail") }, shape = RoundedCornerShape(15.dp))
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(password, { password = it },
-                modifier = Modifier.fillMaxWidth(), singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                label = { Text("Senha") }, shape = RoundedCornerShape(15.dp))
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = { if (register) account.register(email, password) else account.signIn(email, password) },
-                enabled = !account.busy, modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(15.dp)) {
-                Text(if (register) "Criar conta" else "Entrar na Ocarina")
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = { emailMode = !emailMode; account.clearMessage() },
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                shape = RoundedCornerShape(28.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, c.outline),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = c.text),
+            ) {
+                VI(LucideR.drawable.lucide_ic_user_round, null, Modifier.size(21.dp), c.accent)
+                Spacer(Modifier.width(12.dp))
+                Text(if (emailMode) "Fechar e-mail" else "Continuar com e-mail",
+                    fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             }
-            TextButton(onClick = { register = !register; account.clearMessage() }) {
-                Text(if (register) "Já tenho uma conta" else "Criar conta com e-mail")
+        }
+        if (emailMode) {
+            item {
+                Spacer(Modifier.height(12.dp))
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+                    .background(c.surface).padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                        .background(c.elevated).padding(4.dp)) {
+                        listOf(false to "Entrar", true to "Criar conta").forEach { (value, label) ->
+                            val chosen = register == value
+                            Box(Modifier.weight(1f).height(40.dp)
+                                .clip(RoundedCornerShape(15.dp))
+                                .background(if (chosen) c.accent else Color.Transparent)
+                                .clickable { register = value; account.clearMessage() },
+                                contentAlignment = Alignment.Center) {
+                                Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                    color = if (chosen) c.onAccent else c.text)
+                            }
+                        }
+                    }
+                    OutlinedTextField(email, onValueChange = { email = it.take(200) },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        label = { Text("E-mail") }, shape = RoundedCornerShape(14.dp))
+                    OutlinedTextField(password, onValueChange = { password = it },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        visualTransformation = if (showPassword) VisualTransformation.None
+                            else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            TextButton(onClick = { showPassword = !showPassword }) {
+                                Text(if (showPassword) "Ocultar" else "Mostrar", fontSize = 11.sp)
+                            }
+                        }, label = { Text("Senha") }, shape = RoundedCornerShape(14.dp))
+                    Button(onClick = { if (register) account.register(email, password)
+                        else account.signIn(email, password) },
+                        enabled = !account.busy && email.isNotBlank() && password.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth().height(49.dp),
+                        shape = RoundedCornerShape(25.dp)) {
+                        Text(if (register) "Criar minha conta" else "Entrar", fontWeight = FontWeight.Bold)
+                    }
+                    if (!register) TextButton(onClick = { account.resetPassword(email) },
+                        enabled = email.isNotBlank() && !account.busy,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                        Text("Esqueci minha senha", color = c.accent, fontSize = 12.sp)
+                    }
+                }
             }
-            if (account.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+        item {
+            if (account.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = c.accent)
             account.message?.let { Text(it, color = c.accent, fontSize = 12.sp) }
-            Spacer(Modifier.height(24.dp))
-            Text("Sua biblioteca fica vinculada à sua conta. Fotos e favoritos são privados por padrão.",
-                color = c.muted, fontSize = 11.sp, lineHeight = 17.sp)
+            Spacer(Modifier.height(20.dp))
+            Text("Seu perfil e suas curtidas permanecem privados por padrão.",
+                modifier = Modifier.fillMaxWidth(), color = c.muted, fontSize = 11.sp,
+                lineHeight = 17.sp)
         }
     }
 }
@@ -144,15 +207,15 @@ fun OcarinaV5Header(screen: String, account: OcarinaAccount,
             VI(LucideR.drawable.lucide_ic_arrow_left, "Voltar", Modifier.size(23.dp))
         }
         VI(R.drawable.ocarina_logo, "Ocarina", Modifier.size(36.dp), c.accent)
-        Spacer(Modifier.width(10.dp))
-        Box(Modifier.clip(CircleShape).clickable(onClick = onProfile)) {
-            OcarinaV5Avatar(account.avatarBase64, account.user?.photoUrl?.toString(), 35.dp)
+        // The profile page already displays a large avatar; do not duplicate it in the header.
+        if (screen != "PROFILE" && screen != "PROFILE_EDIT") {
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.clip(CircleShape).clickable(onClick = onProfile)) {
+                OcarinaV5Avatar(account.avatarBase64, account.user?.photoUrl?.toString(), 35.dp)
+            }
         }
         Spacer(Modifier.width(12.dp))
         val title = when (screen) {
-            "SEARCH" -> "Procure seu som"
-            "LIBRARY" -> "Seu espaço"
-            "PROFILE" -> "Perfil"
             "PROFILE_EDIT" -> "Editar perfil"
             "PUBLIC_PROFILE" -> "Perfil público"
             "PLAYLISTS", "PLAYLIST_DETAIL" -> "Playlists"
@@ -185,7 +248,11 @@ fun OcarinaV5Nav(selected: String, account: OcarinaAccount, onSelect: (String) -
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceAround) {
         tabs.forEachIndexed { idx, tab ->
             val active = selected == tab || (selected == "PROFILE_EDIT" && tab == "PROFILE")
-            Box(Modifier.weight(1f).fillMaxHeight().clickable { onSelect(tab) }, contentAlignment = Alignment.Center) {
+            val interaction = remember(tab) { MutableInteractionSource() }
+            Box(Modifier.weight(1f).fillMaxHeight()
+                .clickable(interactionSource = interaction, indication = null) {
+                    if (!active) onSelect(tab)
+                }, contentAlignment = Alignment.Center) {
                 Box(Modifier.size(width = 56.dp, height = 41.dp).clip(RoundedCornerShape(22.dp))
                     .background(if (active) c.softAccent else Color.Transparent),
                     contentAlignment = Alignment.Center) {
@@ -227,7 +294,7 @@ private fun V5Section(name: String, onOpen: (() -> Unit)? = null) {
 private fun V5Cover(song: Song, onClick: () -> Unit, width: Dp = 150.dp) {
     val c = ocarinaColors
     Column(Modifier.width(width).clickable(onClick = onClick)) {
-        Box(Modifier.size(width).clip(RoundedCornerShape(20.dp)).background(c.artworkSurface)) {
+        Box(Modifier.size(width).clip(RoundedCornerShape(22.dp)).background(c.artworkSurface)) {
             AlbumArtwork(song, song.title, Modifier.fillMaxSize(), small = width <= 125.dp)
         }
         Spacer(Modifier.height(9.dp))
@@ -300,8 +367,8 @@ fun OcarinaV5Home(listState: LazyListState, playlists: List<OcarinaPlaylist>,
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(playlists.take(12), key = { it.id }) { list ->
-                        Column(Modifier.width(136.dp).clickable { onOpenPlaylist(list) }) {
-                            OcarinaPlaylistCover(list, 136.dp)
+                        Column(Modifier.width(166.dp).clickable { onOpenPlaylist(list) }) {
+                            OcarinaPlaylistCover(list, 166.dp)
                             Spacer(Modifier.height(8.dp))
                             Text(list.name, color = c.text, fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -311,10 +378,8 @@ fun OcarinaV5Home(listState: LazyListState, playlists: List<OcarinaPlaylist>,
                 }
             }
         }
-        if (filter == "Playlists" && playlists.isEmpty()) item {
-            Text("Ainda sem playlists. Você pode criar uma no seu espaço.", color = c.muted)
-        }
-        if (filter != "Playlists") {
+        
+        if (filter != "Playlists" || playlists.isEmpty()) {
             item { V5Section("Feito pra sua escuta", onSearch) }
             if (loading) item { CircularProgressIndicator(Modifier.size(28.dp), color = c.accent) }
             else if (discoveries.isEmpty()) item {
@@ -352,13 +417,15 @@ fun OcarinaV5Home(listState: LazyListState, playlists: List<OcarinaPlaylist>,
 
 @Composable
 private fun V5Category(label: String, color: Color, icon: Int, onClick: () -> Unit) {
-    val c = ocarinaColors
-    Row(Modifier.fillMaxWidth().height(98.dp).clip(RoundedCornerShape(19.dp))
-        .background(color).clickable(onClick = onClick).padding(16.dp),
-        verticalAlignment = Alignment.Top) {
-        Text(label, modifier = Modifier.weight(1f), color = Color.White,
-            fontSize = 17.sp, fontWeight = FontWeight.Bold)
-        VI(icon, null, Modifier.size(31.dp), Color.White)
+    Box(Modifier.fillMaxWidth().height(120.dp).clip(RoundedCornerShape(24.dp))
+        .background(Brush.linearGradient(listOf(color, color.copy(alpha = 0.76f))))
+        .clickable(onClick = onClick)) {
+        // Soft overlapping shape creates a material tile, not a flat generic square.
+        Box(Modifier.align(Alignment.BottomEnd).offset(x = 29.dp, y = 33.dp)
+            .size(116.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.13f)))
+        Text(label, modifier = Modifier.align(Alignment.TopStart).padding(17.dp),
+            color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        VI(icon, null, Modifier.align(Alignment.BottomEnd).padding(15.dp).size(32.dp), Color.White)
     }
 }
 
@@ -384,7 +451,7 @@ fun OcarinaV5Search(listState: LazyListState, query: String, onQuery: (String) -
         }
     }
     LazyColumn(Modifier.fillMaxSize(), state = listState,
-        contentPadding = PaddingValues(start = 19.dp, end = 19.dp, top = 10.dp, bottom = 35.dp),
+        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 35.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             OutlinedTextField(query, onValueChange = onQuery,
@@ -446,7 +513,7 @@ fun OcarinaV5Search(listState: LazyListState, query: String, onQuery: (String) -
             } else if (filter != "Tudo") item {
                 Text("Pesquise para encontrar ${filter.lowercase()} no catálogo.", color = c.muted, fontSize = 13.sp)
             }
-            item { Text("Digite um nome para encontrar músicas e perfis públicos.", color = c.muted, fontSize = 12.sp) }
+
         } else {
             if (filter != "Perfis") {
                 if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth(), color = c.accent) }
@@ -509,8 +576,9 @@ fun OcarinaV5Library(listState: LazyListState, playlists: List<OcarinaPlaylist>,
         }
         item { Spacer(Modifier.height(6.dp)) }
         item {
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).clickable(onClick = onLiked)
-                .padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp))
+                .background(Brush.horizontalGradient(listOf(c.elevated, c.surface)))
+                .clickable(onClick = onLiked).padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(68.dp).clip(RoundedCornerShape(16.dp))
                     .background(Brush.linearGradient(listOf(c.accent, c.artworkSurface))),
                     contentAlignment = Alignment.Center) {
@@ -539,8 +607,6 @@ fun OcarinaV5Library(listState: LazyListState, playlists: List<OcarinaPlaylist>,
                     VI(LucideR.drawable.lucide_ic_chevron_right, "Abrir", Modifier.size(19.dp), c.muted)
                 }
             }
-        } else item {
-            Text("Sem playlists? Use o + no topo para criar a primeira.", color = c.muted, fontSize = 12.sp)
         }
         if (recent.isNotEmpty()) {
             item { V5Section("Ouvidas recentemente") }
@@ -712,25 +778,56 @@ fun OcarinaV5PublicProfile(profile: OcarinaPublicProfile, onShare: () -> Unit) {
     }
 }
 
+/** Only the full player animates: list thumbnails and the mini-player remain static. */
 @Composable
-fun OcarinaV5Disc(song: Song, size: Dp) {
+fun OcarinaV5Disc(song: Song, size: Dp, playing: Boolean) {
     val c = ocarinaColors
-    Box(Modifier.size(size).clip(CircleShape)
-        .background(c.elevated).border(2.dp, c.outline.copy(alpha = 0.8f), CircleShape),
-        contentAlignment = Alignment.Center) {
-        if (song.artwork.isNotBlank()) AlbumArtwork(song, "Capa como CD de ${song.title}",
-            Modifier.fillMaxSize(), highQuality = true)
-        else VI(LucideR.drawable.lucide_ic_disc_3, "Disco", Modifier.size(size * 0.68f), c.accent)
-        // Subtle reflective CD grooves; no continuous animation or scrolling work.
-        Box(Modifier.fillMaxSize().clip(CircleShape)
-            .background(Brush.sweepGradient(listOf(Color.White.copy(alpha = 0.18f),
-                Color.Transparent, c.softAccent.copy(alpha = 0.2f), Color.Transparent,
-                Color.White.copy(alpha = 0.18f)))))
-        Box(Modifier.size(size * 0.32f).clip(CircleShape)
-            .background(c.surface.copy(alpha = 0.93f)).border(2.dp, c.accent.copy(alpha = 0.7f), CircleShape),
-            contentAlignment = Alignment.Center) {
-            Box(Modifier.size(size * 0.115f).clip(CircleShape)
-                .background(c.background).border(1.dp, c.outline, CircleShape))
+    var flipped by remember(song.videoId) { mutableStateOf(false) }
+    val flip by animateFloatAsState(if (flipped) 180f else 0f,
+        animationSpec = tween(durationMillis = 420), label = "Virada do CD")
+    val turn = remember(song.videoId) { Animatable(0f) }
+    LaunchedEffect(song.videoId, playing, flipped) {
+        if (playing && !flipped) {
+            while (isActive) {
+                val start = turn.value % 360f
+                turn.snapTo(start)
+                turn.animateTo(start + 360f, animationSpec = tween(19_000, easing = LinearEasing))
+            }
+        }
+    }
+    Box(Modifier.size(size)
+        .graphicsLayer {
+            rotationY = if (flip <= 90f) flip else flip - 180f
+            cameraDistance = 18f * density
+        }
+        .clickable { flipped = !flipped }, contentAlignment = Alignment.Center) {
+        if (flip < 90f) {
+            Box(Modifier.fillMaxSize().graphicsLayer { rotationZ = turn.value }
+                .clip(CircleShape).background(c.elevated)
+                .border(2.dp, c.outline.copy(alpha = 0.78f), CircleShape),
+                contentAlignment = Alignment.Center) {
+                if (song.artwork.isNotBlank()) AlbumArtwork(song, "CD de ${song.title}",
+                    Modifier.fillMaxSize(), highQuality = true)
+                else VI(LucideR.drawable.lucide_ic_disc_3, "Disco", Modifier.size(size * 0.66f), c.accent)
+                Box(Modifier.fillMaxSize().clip(CircleShape)
+                    .background(Brush.sweepGradient(listOf(Color.White.copy(alpha = 0.13f),
+                        Color.Transparent, c.softAccent.copy(alpha = 0.15f), Color.Transparent,
+                        Color.White.copy(alpha = 0.13f)))))
+                Box(Modifier.size(size * 0.27f).clip(CircleShape)
+                    .background(c.surface.copy(alpha = 0.92f))
+                    .border(2.dp, c.accent.copy(alpha = 0.65f), CircleShape),
+                    contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(size * 0.09f).clip(CircleShape)
+                        .background(c.background).border(1.dp, c.outline, CircleShape))
+                }
+            }
+        } else {
+            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(22.dp))
+                .background(c.artworkSurface), contentAlignment = Alignment.Center) {
+                if (song.artwork.isNotBlank()) AlbumArtwork(song, "Capa de ${song.title}",
+                    Modifier.fillMaxSize(), highQuality = true)
+                else VI(LucideR.drawable.lucide_ic_music_2, "Álbum", Modifier.size(size * 0.5f), c.accent)
+            }
         }
     }
 }

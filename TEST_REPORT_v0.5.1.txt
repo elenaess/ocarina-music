@@ -1,0 +1,18 @@
+Ocarina v0.5.1 — Test report (2026-11-19)
+
+PASS: 19 static project checks (tools/verify_v051.py)
+PASS: AndroidManifest.xml and adaptive launcher icon parsed as XML
+PASS: Kotlin source parser: no expecting/unexpected-token syntax errors from kotlinc check
+PASS: Same Android package com.ocarina.app and CI keystore configuration
+PASS: New UI state hooks, log-in email reset, navbar icon resources checked
+PASS: Firestore rules included unchanged from v0.5.0
+
+NOT RUN: Gradle :app:assembleDebug (Android SDK not available in this container)
+NOT RUN: Device playback, smoothness measurements, visual Android rendering
+NOT RUN: Firebase Authentication on an Android phone
+
+Build after pushing to main:
+https://github.com/elenaess/ocarina-music/actions
+Artifact: ocarina-v0.5.1-polish-debug
+
+This report does not claim that the APK is already compiled or tested on a device.

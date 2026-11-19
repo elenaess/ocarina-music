@@ -603,23 +603,46 @@ fun OcarinaApp() {
                 onCreate = { songForNewPlaylist = song; creatingPlaylist = true; addToPlaylist = null },
                 onDismiss = { addToPlaylist = null })
         }
-        if (creatingPlaylist) AlertDialog(onDismissRequest = { creatingPlaylist = false; songForNewPlaylist = null },
-            title = { Text("Nova playlist") },
-            text = { OutlinedTextField(value = newPlaylistName,
-                onValueChange = { newPlaylistName = it.take(80) },
-                singleLine = true, label = { Text("Nome") }) },
-            confirmButton = { TextButton(onClick = {
-                val list = playlistStore.create(newPlaylistName).copy(
-                    songs = songForNewPlaylist?.let(::listOf).orEmpty())
-                songForNewPlaylist = null
-                savePlaylists(listOf(list) + playlists)
-                selectedPlaylistId = list.id
-                playlistReturnScreen = Screen.PLAYLISTS
-                creatingPlaylist = false
-                newPlaylistName = ""
-                screen = Screen.PLAYLIST_DETAIL
-            }, enabled = newPlaylistName.isNotBlank()) { Text("Criar") } },
-            dismissButton = { TextButton(onClick = { creatingPlaylist = false; songForNewPlaylist = null }) { Text("Cancelar") } })
+        if (creatingPlaylist) AlertDialog(
+            onDismissRequest = { creatingPlaylist = false; songForNewPlaylist = null },
+            shape = RoundedCornerShape(25.dp),
+            containerColor = c.surface,
+            title = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Criar playlist", color = c.text, fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold)
+                    Text("Dê um nome à sua nova coleção.", color = c.muted, fontSize = 12.sp)
+                }
+            },
+            text = {
+                OutlinedTextField(newPlaylistName, onValueChange = { newPlaylistName = it.take(80) },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    placeholder = { Text("Nome da playlist") },
+                    shape = RoundedCornerShape(15.dp),
+                    leadingIcon = { LIcon(LucideR.drawable.lucide_ic_pencil, null,
+                        Modifier.size(18.dp), c.accent) })
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val list = playlistStore.create(newPlaylistName).copy(
+                        songs = songForNewPlaylist?.let(::listOf).orEmpty())
+                    songForNewPlaylist = null
+                    savePlaylists(listOf(list) + playlists)
+                    selectedPlaylistId = list.id
+                    playlistReturnScreen = Screen.PLAYLISTS
+                    creatingPlaylist = false
+                    newPlaylistName = ""
+                    screen = Screen.PLAYLIST_DETAIL
+                }, enabled = newPlaylistName.isNotBlank(), shape = RoundedCornerShape(20.dp)) {
+                    Text("Criar", fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { creatingPlaylist = false; songForNewPlaylist = null }) {
+                    Text("Cancelar", color = c.muted)
+                }
+            },
+        )
         if (importMessage != null) AlertDialog(onDismissRequest = { importMessage = null },
             title = { Text("Downloads") }, text = { Text(importMessage.orEmpty()) },
             confirmButton = { TextButton(onClick = { importMessage = null }) { Text("Entendi") } })
@@ -627,7 +650,7 @@ fun OcarinaApp() {
             AlertDialog(
                 onDismissRequest = { showInfo = false },
                 title = { Text("Ocarina") },
-                text = { Text("Versão 0.5.0. Contas Google e e-mail pelo Firebase, foto e favoritos no Firestore. Psiu ainda não está integrado. Reprodução experimental via fontes externas.") },
+                text = { Text("Versão 0.5.1. Contas Google e e-mail pelo Firebase, foto e favoritos no Firestore. Psiu ainda não está integrado. Reprodução experimental via fontes externas.") },
                 confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Entendi") } },
             )
         }
@@ -1141,7 +1164,7 @@ private fun NativePlayerScreen(
             Spacer(Modifier.weight(0.5f))
             BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 val discSize = minOf(maxWidth * 0.91f, 350.dp)
-                OcarinaV5Disc(song, discSize)
+                OcarinaV5Disc(song, discSize, playback.playing)
             }
             Spacer(Modifier.weight(0.65f))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

@@ -178,6 +178,18 @@ class OcarinaAccount(private val context: Context) {
             }
     }
 
+    fun resetPassword(email: String) {
+        val address = email.trim()
+        if (address.isBlank()) { message = "Digite seu e-mail primeiro."; return }
+        busy = true
+        message = null
+        auth.sendPasswordResetEmail(address).addOnCompleteListener { task ->
+            busy = false
+            message = if (task.isSuccessful) "Confira seu e-mail para recuperar a senha."
+                else task.exception?.localizedMessage ?: "Não foi possível enviar o e-mail."
+        }
+    }
+
     fun logout() { auth.signOut(); message = null }
     fun clearMessage() { message = null }
 
