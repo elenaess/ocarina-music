@@ -9,13 +9,29 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.ocarina.music"
+        applicationId = "com.ocarina.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.3.3"
+        versionCode = 10
+        versionName = "0.4.1"
+    }
+    val ciKeyStoreFile = System.getenv("OCARINA_SIGNING_STORE_FILE")?.takeIf { it.isNotBlank() && file(it).isFile }
+    signingConfigs {
+        if (ciKeyStoreFile != null) {
+            create("ocarinaPreview") {
+                storeFile = file(ciKeyStoreFile)
+                storePassword = System.getenv("OCARINA_SIGNING_STORE_PASSWORD")
+                keyAlias = System.getenv("OCARINA_SIGNING_KEY_ALIAS") ?: "ocarina"
+                keyPassword = System.getenv("OCARINA_SIGNING_KEY_PASSWORD")
+            }
+        }
     }
     buildTypes {
+        getByName("debug") {
+            if (signingConfigs.findByName("ocarinaPreview") != null) {
+                signingConfig = signingConfigs.getByName("ocarinaPreview")
+            }
+        }
         release { isMinifyEnabled = false }
     }
     compileOptions {
@@ -31,6 +47,14 @@ android {
 }
 
 dependencies {
+    implementation(platform("com.google.firebase:firebase-bom:35.2.0"))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("androidx.credentials:credentials:1.6.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.6.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
+
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
     implementation("com.github.teamnewpipe:NewPipeExtractor:v0.27.1")
     implementation("androidx.media3:media3-exoplayer:1.9.4")

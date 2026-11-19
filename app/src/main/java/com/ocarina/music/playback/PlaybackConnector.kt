@@ -3,6 +3,7 @@ package com.ocarina.music.playback
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +36,7 @@ class PlaybackConnector(context: Context) {
     private var resolving: Job? = null
     private var prefetchJob: Job? = null
     private var retryingSource = false
+    private var playSerial = 0L
 
     var currentSong by mutableStateOf<Song?>(null)
         private set
@@ -59,8 +61,10 @@ class PlaybackConnector(context: Context) {
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) { sync(player) }
         override fun onPlayerError(error: PlaybackException) {
+            Log.e("OcarinaPlayback", "Falha Media3 na faixa ${currentSong?.videoId}", error)
             // Expiring temporary URLs occasionally return 403. Retry the current track once.
             if (!retryingSource && currentSong != null &&
+                player.currentMediaItem?.mediaId == currentSong?.videoId &&
                 (error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
                     error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED)) {
                 retryingSource = true
@@ -102,6 +106,7 @@ class PlaybackConnector(context: Context) {
         playing = player.isPlaying
         buffering = player.playbackState == Player.STATE_BUFFERING
         val item = player.currentMediaItem
+        // Do not let events from the OLD media item overwrite a freshly selected search result.
         if (item != null && !resolvingAudio && item.mediaId == currentSong?.videoId) {
             val md = item.mediaMetadata
             currentSong = Song(
@@ -114,10 +119,19 @@ class PlaybackConnector(context: Context) {
     }
 
     fun play(song: Song, next: Song? = null, refresh: Boolean = false, isRetry: Boolean = false) {
+        // Re-selecting the active track should not re-fetch the same signed URL.
+        if (!refresh && !resolvingAudio && controller?.currentMediaItem?.mediaId == song.videoId &&
+            controller?.playbackState == Player.STATE_READY) {
+            controller?.play()
+            return
+        }
         resolving?.cancel()
         prefetchJob?.cancel()
+        val thisRequest = ++playSerial
         if (!isRetry) retryingSource = false
         resolvingAudio = true
+        // Only pause the previous track: stop()/clearMediaItems() cause extra MediaSession
+        // transitions and can synchronously restore stale metadata into Compose.
         controller?.pause()
         currentSong = song
         sourceBitrateKbps = 0L
@@ -126,6 +140,7 @@ class PlaybackConnector(context: Context) {
             try {
                 val source = AudioSourceResolver.resolve(song.videoId, refresh = refresh)
                 val c = connected.await()
+                if (thisRequest != playSerial) return@launch
                 sourceBitrateKbps = source.bitrateKbps.toLong()
                 val item = MediaItem.Builder()
                     .setMediaId(song.videoId)
@@ -155,7 +170,10 @@ class PlaybackConnector(context: Context) {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                error = "Não foi possível carregar '${song.title}': ${e.message ?: "falha na fonte"}"
+                if (thisRequest != playSerial) return@launch
+                Log.e("OcarinaPlayback", "Falha ao resolver ${song.videoId}", e)
+                error = "Não foi possível carregar '${song.title}'. ${e.message ?: "Fonte temporariamente indisponível."}"
+                buffering = false
             } finally {
                 resolvingAudio = false
             }
@@ -167,13 +185,19 @@ class PlaybackConnector(context: Context) {
     }
     fun toggle() {
         if (resolvingAudio) return
-        if (controller?.currentMediaItem?.mediaId != currentSong?.videoId || error != null) {
+        val active = controller?.currentMediaItem?.mediaId
+        // Never resume the PREVIOUS song if a newly selected result failed to resolve.
+        if (active == null || active != currentSong?.videoId || error != null) {
             retryCurrent()
             return
         }
         controller?.let { if (it.isPlaying) it.pause() else it.play() }
     }
-    fun seekTo(ms: Long) { controller?.seekTo(ms.coerceAtLeast(0L)) }
+    fun seekTo(ms: Long) {
+        if (controller?.currentMediaItem?.mediaId == currentSong?.videoId) {
+            controller?.seekTo(ms.coerceAtLeast(0L))
+        }
+    }
     fun clearError() { error = null }
     fun close() {
         resolving?.cancel()

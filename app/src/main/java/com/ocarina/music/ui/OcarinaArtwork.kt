@@ -19,12 +19,12 @@ import com.ocarina.music.data.Song
  * Some uploads only have a small source image; no client can restore missing pixels.
  */
 private fun preferredArtwork(original: String, videoId: String, highQuality: Boolean): String {
-    val size = if (highQuality) 720 else 420
+    val size = if (highQuality) 720 else 360
     val sized = Regex("=w\\d+-h\\d+[^&?]*").find(original)
     if (sized != null) return original.replaceRange(sized.range, "=w${size}-h${size}-l90-rj")
     val yt = Regex("https?://i\\.ytimg\\.com/vi/([a-zA-Z0-9_-]{11})/")
     if (yt.containsMatchIn(original)) {
-        return "https://i.ytimg.com/vi/$videoId/${if (highQuality) "maxresdefault" else "sddefault"}.jpg"
+        return "https://i.ytimg.com/vi/$videoId/sddefault.jpg"
     }
     return original
 }
@@ -42,7 +42,7 @@ fun AlbumArtwork(
         preferredArtwork(song.artwork, song.videoId, highQuality)
     }
     var imageUrl by remember(first, song.artwork) { mutableStateOf(first) }
-    val pixelLimit = if (highQuality) 720 else if (small) 180 else 420
+    val pixelLimit = if (highQuality) 720 else if (small) 144 else 360
     val request = remember(imageUrl, pixelLimit) {
         ImageRequest.Builder(context)
             .data(imageUrl)

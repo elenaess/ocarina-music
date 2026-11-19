@@ -1,6 +1,12 @@
 package com.ocarina.music.ui
 
 import android.app.Activity
+import android.graphics.BitmapFactory
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import coil.compose.AsyncImage
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -32,6 +38,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,6 +51,7 @@ import com.ocarina.music.R
 import com.composables.icons.lucide.R as LucideR
 import com.ocarina.music.data.FavoritesStore
 import com.ocarina.music.data.OcarinaSettings
+import com.ocarina.music.data.OcarinaAccount
 import com.ocarina.music.data.Song
 import com.ocarina.music.data.YouTubeMusicSearch
 import com.ocarina.music.playback.PlaybackConnector
@@ -83,6 +92,8 @@ fun OcarinaApp() {
         }
         val searchClient = remember { YouTubeMusicSearch() }
         val store = remember(context) { FavoritesStore(context) }
+        val account = remember(context) { OcarinaAccount(context) }
+        DisposableEffect(account) { onDispose { account.close() } }
         val favorites = remember { mutableStateListOf<Song>().apply { addAll(store.load()) } }
         val recent = remember { mutableStateListOf<Song>().apply { addAll(settings.recentlyPlayed()) } }
         val playback = remember(context) { PlaybackConnector(context) }
@@ -106,6 +117,31 @@ fun OcarinaApp() {
         val likedScroll = rememberLazyListState()
         var queue by remember { mutableStateOf<List<Song>>(emptyList()) }
         var switchingTabs by remember { mutableStateOf(false) }
+        var syncedAccount by remember { mutableStateOf<String?>(null) }
+        // Keep guest favourites local; cloud favourites are scoped to each signed-in user.
+        LaunchedEffect(account.user?.uid) {
+            syncedAccount = null
+            favorites.clear()
+            favorites.addAll(store.load(account.user?.uid))
+        }
+        LaunchedEffect(account.user?.uid, account.favoritesReady, account.cloudFavorites) {
+            val uid = account.user?.uid ?: return@LaunchedEffect
+            if (!account.favoritesReady) return@LaunchedEffect
+            val cloud = account.cloudFavorites
+            if (syncedAccount != uid) {
+                val local = store.load(uid)
+                val onlyLocal = local.filterNot { entry -> cloud.any { it.videoId == entry.videoId } }
+                onlyLocal.forEach { account.setFavorite(it, true) }
+                val combined = (cloud + onlyLocal).distinctBy { it.videoId }
+                favorites.clear(); favorites.addAll(combined)
+                store.save(combined, uid)
+                syncedAccount = uid
+            } else {
+                // Subsequent snapshots are authoritative, including deletions from another device.
+                favorites.clear(); favorites.addAll(cloud)
+                store.save(cloud, uid)
+            }
+        }
         LaunchedEffect(screen) {
             switchingTabs = true
             delay(90)
@@ -118,8 +154,10 @@ fun OcarinaApp() {
         }
         fun toggleFavorite(song: Song) {
             val index = favorites.indexOfFirst { it.videoId == song.videoId }
-            if (index < 0) favorites.add(0, song) else favorites.removeAt(index)
-            store.save(favorites.toList())
+            val adding = index < 0
+            if (adding) favorites.add(0, song) else favorites.removeAt(index)
+            store.save(favorites.toList(), account.user?.uid)
+            account.setFavorite(song, adding)
         }
         fun playSong(song: Song, source: List<Song>) {
             queue = source.ifEmpty { listOf(song) }
@@ -211,7 +249,7 @@ fun OcarinaApp() {
                         onFavorite = ::toggleFavorite, onExplore = { screen = Screen.SEARCH },
                     )
                     Screen.PROFILE -> ProfilePage(
-                        isDark = dark, favorites = favorites.size, recent = recent.size,
+                        account = account, isDark = dark, favorites = favorites.size, recent = recent.size,
                         onTheme = { value -> dark = value; settings.setDark(value) },
                         onInfo = { showInfo = true }, onLiked = { screen = Screen.LIKED },
                     )
@@ -242,7 +280,7 @@ fun OcarinaApp() {
             AlertDialog(
                 onDismissRequest = { showInfo = false },
                 title = { Text("Ocarina") },
-                text = { Text("Versão 0.3.3. Seu perfil é local; login Firebase e integração com Psiu ainda não estão ativos. Reprodução experimental via fontes não oficiais do YouTube Music. Recursos de playlist e download serão adicionados futuramente.") },
+                text = { Text("Versão 0.4.1. Contas Google e e-mail pelo Firebase, foto e favoritos no Firestore. Psiu ainda não está integrado. Reprodução experimental via fontes externas.") },
                 confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Entendi") } },
             )
         }
@@ -250,41 +288,39 @@ fun OcarinaApp() {
 }
 
 
-/** Navegação compacta com Lucide. */
+/** Compact, icon-only navigation. Insets keep it clear of Android's gesture bar. */
 @Composable
 private fun FastNav(screen: Screen, onSelect: (Screen) -> Unit) {
     val c = ocarinaColors
-    val tabs = remember { listOf(
-        Triple(Screen.HOME, "Início", LucideR.drawable.lucide_ic_house),
-        Triple(Screen.SEARCH, "Buscar", LucideR.drawable.lucide_ic_search),
-        Triple(Screen.LIBRARY, "Biblioteca", LucideR.drawable.lucide_ic_library),
-        Triple(Screen.LIKED, "Curtidas", LucideR.drawable.lucide_ic_heart)
-    ) }
+    val tabs = remember {
+        listOf(
+            Triple(Screen.HOME, "Início", LucideR.drawable.lucide_ic_house),
+            Triple(Screen.SEARCH, "Buscar", LucideR.drawable.lucide_ic_search),
+            Triple(Screen.LIBRARY, "Biblioteca", LucideR.drawable.lucide_ic_library),
+            Triple(Screen.LIKED, "Curtidas", LucideR.drawable.lucide_ic_heart),
+        )
+    }
     Row(
-        Modifier.fillMaxWidth().background(c.background)
-            .navigationBarsPadding().height(52.dp)
-            .padding(horizontal = 12.dp),
+        modifier = Modifier.fillMaxWidth().background(c.background)
+            .navigationBarsPadding().height(52.dp).padding(horizontal = 12.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        tabs.forEach { (tab, label, ic) ->
-            val active = tab == screen
+        tabs.forEach { (tab, label, drawable) ->
+            val selected = tab == screen
             val tint by animateColorAsState(
-                if (active) c.accent else c.muted,
-                animationSpec = tween(90), label = "nav"
+                if (selected) c.accent else c.muted,
+                animationSpec = tween(90), label = "navigation-tint",
             )
-            val touch = remember { MutableInteractionSource() }
+            val interaction = remember { MutableInteractionSource() }
             Box(
-                Modifier.weight(1f).fillMaxHeight()
-                    .clickable(
-                        interactionSource = touch,
-                        indication = null
-                    ) { if (!active) onSelect(tab) },
-                contentAlignment = Alignment.Center
+                modifier = Modifier.weight(1f).fillMaxHeight()
+                    .clickable(interactionSource = interaction, indication = null) {
+                        if (screen != tab) onSelect(tab)
+                    },
+                contentAlignment = Alignment.Center,
             ) {
-                LIcon(ic, label, Modifier.size(
-                    if (active) 25.dp else 24.dp
-                ), tint)
+                LIcon(drawable, label, Modifier.size(if (selected) 25.dp else 24.dp), tint)
             }
         }
     }
@@ -354,7 +390,7 @@ private fun HomePage(
     LazyColumn(
         modifier = Modifier.fillMaxSize(), state = listState,
         contentPadding = PaddingValues(start = 17.dp, end = 17.dp, top = 8.dp, bottom = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
             Column {
@@ -406,7 +442,7 @@ private fun HomePage(
 private fun SectionHeader(title: String, onClick: (() -> Unit)? = null) {
     val c = ocarinaColors
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, color = c.text, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(title, color = c.text, fontSize = 21.sp, letterSpacing = (-0.35).sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         if (onClick != null) IconButton(onClick = onClick, modifier = Modifier.size(34.dp)) {
             LIcon(LucideR.drawable.lucide_ic_chevron_right, "Ver mais", Modifier.size(20.dp))
         }
@@ -446,7 +482,7 @@ private fun SearchPage(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            Text("O que vamos ouvir?", color = c.text, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Text("O que vamos ouvir?", color = c.text, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(14.dp))
             OutlinedTextField(
                 value = text, onValueChange = onText, modifier = Modifier.fillMaxWidth(),
@@ -464,7 +500,7 @@ private fun SearchPage(
             )
             Spacer(Modifier.height(17.dp))
             Text(if (text.isBlank()) "Explore por aqui" else "Resultados", color = c.text,
-                fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
         }
         if (text.isBlank()) item { EmptyPanel("Uma nova descoberta começa na busca", "Pesquise sua próxima música favorita.", LucideR.drawable.lucide_ic_search) }
         else if (loading) item { LoadingRow() }
@@ -490,7 +526,7 @@ private fun LibraryPage(
         verticalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         item {
-            Text("Sua Biblioteca", fontSize = 31.sp, fontWeight = FontWeight.Bold, color = c.text)
+            Text("Sua Biblioteca", fontSize = 31.sp, fontWeight = FontWeight.SemiBold, color = c.text)
             Spacer(Modifier.height(17.dp))
             LibraryEntry(LucideR.drawable.lucide_ic_heart, "Músicas Curtidas", "${favorites.size} músicas", onLiked)
             LibraryEntry(LucideR.drawable.lucide_ic_download, "Downloads", "Em desenvolvimento", onInfo)
@@ -547,7 +583,7 @@ private fun LikedPage(listState: LazyListState, favorites: List<Song>, onPlay: (
                 LIcon(LucideR.drawable.lucide_ic_heart, null, Modifier.size(67.dp), c.accent)
             }
             Spacer(Modifier.height(17.dp))
-            Text("Músicas Curtidas", color = c.text, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text("Músicas Curtidas", color = c.text, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
             Text("${favorites.size} músicas salvas neste dispositivo", color = c.muted, fontSize = 12.sp)
             Spacer(Modifier.height(17.dp))
             if (favorites.isNotEmpty()) FilledIconButton(
@@ -567,51 +603,121 @@ private fun LikedPage(listState: LazyListState, favorites: List<Song>, onPlay: (
 }
 
 @Composable
-private fun ProfilePage(isDark: Boolean, favorites: Int, recent: Int, onTheme: (Boolean) -> Unit, onInfo: () -> Unit, onLiked: () -> Unit) {
+private fun ProfilePage(account: OcarinaAccount, isDark: Boolean, favorites: Int, recent: Int,
+    onTheme: (Boolean) -> Unit, onInfo: () -> Unit, onLiked: () -> Unit) {
     val c = ocarinaColors
+    val activity = LocalContext.current as? Activity
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var registering by remember { mutableStateOf(false) }
+    var nameInput by remember(account.user?.uid, account.displayName) { mutableStateOf(account.displayName) }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) account.uploadAvatar(uri)
+    }
+    val avatarBitmap = remember(account.avatarBase64) {
+        runCatching {
+            if (account.avatarBase64.isBlank()) null else {
+                val data = Base64.decode(account.avatarBase64, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(data, 0, data.size)?.asImageBitmap()
+            }
+        }.getOrNull()
+    }
     LazyColumn(
         Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 21.dp, end = 21.dp, top = 14.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item {
             Column {
-                Box(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(29.dp)).background(c.surface)
-                        .padding(horizontal = 22.dp, vertical = 26.dp),
-                    contentAlignment = Alignment.Center,
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(25.dp)).background(c.surface)
+                        .padding(horizontal = 21.dp, vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(Modifier.size(95.dp).clip(CircleShape).background(c.softAccent),
-                            contentAlignment = Alignment.Center) {
-                            LIcon(LucideR.drawable.lucide_ic_user_round, "Avatar", Modifier.size(48.dp), c.accent)
-                        }
-                        Spacer(Modifier.height(15.dp))
-                        Text("Seu espaço", fontSize = 26.sp, color = c.text, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(5.dp))
-                        Text("Perfil local, só seu por enquanto", color = c.muted, fontSize = 13.sp)
-                        Spacer(Modifier.height(22.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            ProfileStat(favorites.toString(), "Curtidas")
-                            Box(Modifier.width(1.dp).height(37.dp).background(c.outline))
-                            ProfileStat(recent.toString(), "Recentes")
-                            Box(Modifier.width(1.dp).height(37.dp).background(c.outline))
-                            ProfileStat("0", "Playlists")
-                        }
+                    Box(Modifier.size(99.dp).clip(CircleShape).background(c.softAccent), contentAlignment = Alignment.Center) {
+                        if (avatarBitmap != null) Image(
+                            bitmap = avatarBitmap, contentDescription = "Sua foto de perfil",
+                            contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        else if (account.user?.photoUrl != null) AsyncImage(
+                            model = account.user?.photoUrl,
+                            contentDescription = "Foto da conta Google",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                            error = painterResource(LucideR.drawable.lucide_ic_user_round),
+                        )
+                        else LIcon(LucideR.drawable.lucide_ic_user_round, "Avatar", Modifier.size(47.dp), c.accent)
                     }
-                }
-                Spacer(Modifier.height(16.dp))
-                Surface(
-                    onClick = onInfo, modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(17.dp), color = c.softAccent,
-                ) {
-                    Row(Modifier.padding(17.dp), verticalAlignment = Alignment.CenterVertically) {
-                        LIcon(LucideR.drawable.lucide_ic_log_in, null, Modifier.size(22.dp), c.accent)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Entrar ou criar conta", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = c.text)
-                            Text("Firebase será conectado na próxima etapa", fontSize = 11.sp, color = c.muted)
+                    Spacer(Modifier.height(12.dp))
+                    if (account.user == null) {
+                        Text("Entrar no Ocarina", color = c.text, fontSize = 23.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Sincronize suas curtidas e sua foto", color = c.muted, fontSize = 12.sp)
+                        Spacer(Modifier.height(17.dp))
+                        OutlinedButton(
+                            onClick = { activity?.let { account.signInWithGoogle(it) } },
+                            enabled = !account.busy && activity != null,
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                            shape = RoundedCornerShape(13.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(containerColor = c.surface),
+                            border = BorderStroke(1.dp, c.outline),
+                        ) {
+                            Image(painter = painterResource(R.drawable.google_g),
+                                contentDescription = null, modifier = Modifier.size(22.dp))
+                            Spacer(Modifier.width(11.dp))
+                            Text("Continuar com Google", color = c.text, fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold)
                         }
-                        LIcon(LucideR.drawable.lucide_ic_chevron_right, null, Modifier.size(18.dp), c.accent)
+                        Spacer(Modifier.height(13.dp))
+                        Text("ou entre com e-mail", color = c.muted, fontSize = 12.sp)
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = email, onValueChange = { email = it }, singleLine = true,
+                            label = { Text("E-mail") }, modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(13.dp),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = password, onValueChange = { password = it }, singleLine = true,
+                            label = { Text("Senha") }, visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp),
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Button(
+                            onClick = { if (registering) account.register(email, password) else account.signIn(email, password) },
+                            enabled = !account.busy, modifier = Modifier.fillMaxWidth(),
+                        ) { Text(if (registering) "Criar conta" else "Entrar") }
+                        TextButton(onClick = { registering = !registering; account.clearMessage() }) {
+                            Text(if (registering) "Já tenho uma conta" else "Criar uma conta")
+                        }
+                    } else {
+                        Text(account.displayName.ifBlank { "Seu espaço" }, color = c.text,
+                            fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+                        Text(account.user?.email.orEmpty(), color = c.muted, fontSize = 12.sp)
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedButton(onClick = { imagePicker.launch("image/*") }, enabled = !account.busy) {
+                            LIcon(LucideR.drawable.lucide_ic_user_round, null, Modifier.size(17.dp), c.accent)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Alterar foto")
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = nameInput, onValueChange = { nameInput = it.take(50) },
+                            label = { Text("Nome do perfil") }, singleLine = true,
+                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp),
+                        )
+                        TextButton(onClick = { account.updateName(nameInput) }, enabled = !account.busy) {
+                            Text("Salvar nome")
+                        }
+                        TextButton(onClick = { account.logout() }) { Text("Sair da conta") }
+                    }
+                    if (account.busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp))
+                    if (account.message != null) {
+                        Spacer(Modifier.height(9.dp))
+                        Text(account.message.orEmpty(), color = c.accent, fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.height(17.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        ProfileStat(favorites.toString(), "Curtidas")
+                        Box(Modifier.width(1.dp).height(37.dp).background(c.outline))
+                        ProfileStat(recent.toString(), "Recentes")
                     }
                 }
             }
@@ -646,13 +752,14 @@ private fun ProfilePage(isDark: Boolean, favorites: Int, recent: Int, onTheme: (
             Column {
                 SectionHeader("Conexões")
                 Spacer(Modifier.height(7.dp))
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface).padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    LIcon(LucideR.drawable.lucide_ic_cloud, null, Modifier.size(22.dp), c.accent)
-                    Spacer(Modifier.width(13.dp))
-                    Column {
-                        Text("Integração com Psiu", fontWeight = FontWeight.SemiBold, color = c.text)
-                        Text("Planejada para uma versão futura", color = c.muted, fontSize = 12.sp)
+                Surface(onClick = onInfo, shape = RoundedCornerShape(18.dp), color = c.surface) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        LIcon(LucideR.drawable.lucide_ic_cloud, null, Modifier.size(22.dp), c.accent)
+                        Spacer(Modifier.width(13.dp))
+                        Column {
+                            Text("Integração com Psiu", fontWeight = FontWeight.SemiBold, color = c.text)
+                            Text("Planejada para uma versão futura", color = c.muted, fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -664,7 +771,7 @@ private fun ProfilePage(isDark: Boolean, favorites: Int, recent: Int, onTheme: (
 private fun ProfileStat(value: String, caption: String) {
     val c = ocarinaColors
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = c.text)
+        Text(value, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = c.text)
         Text(caption, fontSize = 11.sp, color = c.muted)
     }
 }
@@ -706,7 +813,7 @@ private fun EmptyPanel(title: String, message: String, @DrawableRes icon: Int, o
     ) {
         LIcon(icon, null, Modifier.size(32.dp), c.accent)
         Spacer(Modifier.height(11.dp))
-        Text(title, color = c.text, fontWeight = FontWeight.Bold, fontSize = 15.sp, textAlign = TextAlign.Center)
+        Text(title, color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, textAlign = TextAlign.Center)
         Spacer(Modifier.height(5.dp))
         Text(message, color = c.muted, fontSize = 12.sp, textAlign = TextAlign.Center)
         if (onClick != null) {
@@ -720,7 +827,7 @@ private fun EmptyPanel(title: String, message: String, @DrawableRes icon: Int, o
 private fun ErrorPanel(message: String, onRetry: () -> Unit) {
     val c = ocarinaColors
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface).padding(20.dp)) {
-        Text("Não conseguimos carregar", color = c.text, fontWeight = FontWeight.Bold)
+        Text("Não conseguimos carregar", color = c.text, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(5.dp))
         Text(message, color = c.muted, fontSize = 12.sp)
         TextButton(onClick = onRetry) {
@@ -752,7 +859,7 @@ private fun MiniPlayer(song: Song, playback: PlaybackConnector, onExpand: () -> 
             AlbumArtwork(song, small = true, modifier = Modifier.size(44.dp).clip(RoundedCornerShape(9.dp)))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis, color = c.text, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis, color = c.text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 Text(if (playback.resolvingAudio) "Preparando áudio..." else song.artist,
                     color = c.muted, fontSize = 11.sp, maxLines = 1)
             }
@@ -792,7 +899,7 @@ private fun NativePlayerScreen(
                 IconButton(onClick = onClose) { LIcon(LucideR.drawable.lucide_ic_chevron_down, "Minimizar", Modifier.size(28.dp)) }
                 Spacer(Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("TOCANDO AGORA", color = c.muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text("TOCANDO AGORA", color = c.muted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp)
                     OcarinaMark(Modifier.size(19.dp), c.text)
                 }
                 Spacer(Modifier.weight(1f))
@@ -808,7 +915,7 @@ private fun NativePlayerScreen(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(song.title, fontSize = 25.sp, lineHeight = 28.sp, color = c.text,
-                        fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(5.dp))
                     Text(song.artist, color = c.muted, fontSize = 15.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)

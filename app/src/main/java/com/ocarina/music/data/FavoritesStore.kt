@@ -8,8 +8,10 @@ import org.json.JSONObject
 class FavoritesStore(context: Context) {
     private val prefs = context.getSharedPreferences("ocarina_library", Context.MODE_PRIVATE)
 
-    fun load(): List<Song> = try {
-        val array = JSONArray(prefs.getString("saved_songs", "[]") ?: "[]")
+    private fun key(uid: String?): String = if (uid.isNullOrBlank()) "saved_songs" else "saved_songs_${uid}"
+
+    fun load(uid: String? = null): List<Song> = try {
+        val array = JSONArray(prefs.getString(key(uid), "[]") ?: "[]")
         (0 until array.length()).mapNotNull { index ->
             val item = array.optJSONObject(index) ?: return@mapNotNull null
             val videoId = item.optString("id")
@@ -23,7 +25,7 @@ class FavoritesStore(context: Context) {
         }
     } catch (_: Exception) { emptyList() }
 
-    fun save(songs: List<Song>) {
+    fun save(songs: List<Song>, uid: String? = null) {
         val array = JSONArray()
         songs.forEach { song ->
             array.put(JSONObject().apply {
@@ -33,6 +35,6 @@ class FavoritesStore(context: Context) {
                 put("artwork", song.artwork)
             })
         }
-        prefs.edit().putString("saved_songs", array.toString()).apply()
+        prefs.edit().putString(key(uid), array.toString()).apply()
     }
 }
