@@ -2,6 +2,7 @@ package com.ocarina.music.ui
 
 import com.ocarina.music.R
 import androidx.compose.ui.text.googlefonts.GoogleFont
+import androidx.compose.ui.text.googlefonts.isAvailableOnDevice
 import androidx.compose.ui.text.googlefonts.Font
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
