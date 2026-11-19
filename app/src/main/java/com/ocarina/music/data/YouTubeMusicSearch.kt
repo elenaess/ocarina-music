@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 /**
  * EXPERIMENTAL catalog integration.
  * WEB_REMIX is an undocumented YouTube Music client. It may stop working at any time.
- * No user credentials are used or stored; playback uses an embedded YouTube player.
+ * No user credentials are used or stored; playback uses the native Media3 player.
  */
 class YouTubeMusicSearch {
     private val http = OkHttpClient.Builder()
@@ -130,7 +130,17 @@ class YouTubeMusicSearch {
             return runs?.optJSONObject(0)?.optString("text").orEmpty()
         }
         val title = col(0).ifBlank { return null }
-        val artist = col(1).ifBlank { "YouTube Music" }
+        // YouTube Music commonly prefixes artist runs with “Música ·”. Skip type labels.
+        val artistRuns = cols?.optJSONObject(1)
+            ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+            ?.optJSONObject("text")?.optJSONArray("runs")
+        val artist = (0 until (artistRuns?.length() ?: 0))
+            .mapNotNull { artistRuns?.optJSONObject(it)?.optString("text") }
+            .map { it.trim() }
+            .firstOrNull { value ->
+                value.isNotBlank() && value !in setOf("Música", "Music", "Video", "Vídeo", "Song", "•", "·") &&
+                    !value.all { it == '•' || it == '·' || it.isWhitespace() }
+            } ?: col(1).ifBlank { "Artista" }
         val thumbs = row.optJSONObject("thumbnail")
             ?.optJSONObject("musicThumbnailRenderer")
             ?.optJSONObject("thumbnail")

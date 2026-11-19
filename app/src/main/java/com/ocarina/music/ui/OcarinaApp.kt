@@ -2,17 +2,21 @@ package com.ocarina.music.ui
 
 import android.app.Activity
 import androidx.annotation.DrawableRes
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -34,10 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowInsetsControllerCompat
-import coil.compose.AsyncImage
 import com.ocarina.music.R
 import com.composables.icons.lucide.R as LucideR
 import com.ocarina.music.data.FavoritesStore
@@ -99,7 +101,17 @@ fun OcarinaApp() {
         var discoverRefresh by remember { mutableIntStateOf(0) }
         var showFullPlayer by remember { mutableStateOf(false) }
         var showInfo by remember { mutableStateOf(false) }
+        val homeScroll = rememberLazyListState()
+        val searchScroll = rememberLazyListState()
+        val libraryScroll = rememberLazyListState()
+        val likedScroll = rememberLazyListState()
         var queue by remember { mutableStateOf<List<Song>>(emptyList()) }
+        var switchingTabs by remember { mutableStateOf(false) }
+        LaunchedEffect(screen) {
+            switchingTabs = true
+            delay(90)
+            switchingTabs = false
+        }
 
         fun openProfile() {
             if (screen != Screen.PROFILE) previousScreen = screen
@@ -137,11 +149,10 @@ fun OcarinaApp() {
             catch (e: Exception) { discoverError = e.message ?: "Não foi possível consultar o catálogo." }
             finally { discoveryLoading = false }
         }
-        LaunchedEffect(screen, searchText, searchRefresh) {
-            if (screen != Screen.SEARCH) return@LaunchedEffect
+        LaunchedEffect(searchText, searchRefresh) {
             val query = searchText.trim()
             if (query.isBlank()) { searchSongs = emptyList(); searchError = null; searchLoading = false; return@LaunchedEffect }
-            delay(350)
+            delay(260)
             searchLoading = true
             searchError = null
             try { searchSongs = searchClient.search(query) }
@@ -150,6 +161,7 @@ fun OcarinaApp() {
             finally { searchLoading = false }
         }
 
+        Box(Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = c.background,
             topBar = {
@@ -165,41 +177,14 @@ fun OcarinaApp() {
                     playback.currentSong?.let { song ->
                         MiniPlayer(song, playback, onExpand = { showFullPlayer = true })
                     }
-                    NavigationBar(containerColor = c.background, tonalElevation = 0.dp, modifier = Modifier.height(76.dp)) {
-                        listOf(
-                            Triple(Screen.HOME, "Início", LucideR.drawable.lucide_ic_house),
-                            Triple(Screen.SEARCH, "Buscar", LucideR.drawable.lucide_ic_search),
-                            Triple(Screen.LIBRARY, "Biblioteca", LucideR.drawable.lucide_ic_library),
-                            Triple(Screen.LIKED, "Curtidas", LucideR.drawable.lucide_ic_heart),
-                        ).forEach { (tab, label, icon) ->
-                            val active = screen == tab
-                            NavigationBarItem(
-                                selected = active,
-                                onClick = { screen = tab },
-                                icon = { LIcon(icon, label, Modifier.size(23.dp), if (active) c.accent else c.muted) },
-                                label = { Text(label, fontSize = 10.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal) },
-                                alwaysShowLabel = true,
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = c.accent,
-                                    selectedTextColor = c.accent,
-                                    indicatorColor = c.softAccent,
-                                    unselectedIconColor = c.muted,
-                                    unselectedTextColor = c.muted,
-                                ),
-                            )
-                        }
-                    }
+                    FastNav(screen = screen, onSelect = { screen = it })
                 }
             },
         ) { insets ->
-            AnimatedContent(
-                targetState = screen,
-                modifier = Modifier.fillMaxSize().padding(insets),
-                transitionSpec = { fadeIn(tween(170)) togetherWith fadeOut(tween(100)) },
-                label = "ocarina-screen",
-            ) { page ->
-                when (page) {
+            Box(Modifier.fillMaxSize().padding(insets)) {
+                when (screen) {
                     Screen.HOME -> HomePage(
+                        listState = homeScroll,
                         songs = discoverSongs, recent = recent, favorites = favorites,
                         loading = discoveryLoading, error = discoverError,
                         onRetry = { discoverRefresh++ },
@@ -209,17 +194,20 @@ fun OcarinaApp() {
                         onLibrary = { screen = Screen.LIBRARY },
                     )
                     Screen.SEARCH -> SearchPage(
+                        listState = searchScroll,
                         text = searchText, onText = { searchText = it }, songs = searchSongs,
                         favorites = favorites, loading = searchLoading, error = searchError,
                         onRetry = { searchRefresh++ },
                         onPlay = { song -> playSong(song, searchSongs) }, onFavorite = ::toggleFavorite,
                     )
                     Screen.LIBRARY -> LibraryPage(
+                        listState = libraryScroll,
                         favorites = favorites, recent = recent,
                         onLiked = { screen = Screen.LIKED }, onPlay = { song -> playSong(song, recent) },
                         onFavorite = ::toggleFavorite, onSearch = { screen = Screen.SEARCH }, onInfo = { showInfo = true },
                     )
                     Screen.LIKED -> LikedPage(
+                        listState = likedScroll,
                         favorites = favorites, onPlay = { song -> playSong(song, favorites.toList()) },
                         onFavorite = ::toggleFavorite, onExplore = { screen = Screen.SEARCH },
                     )
@@ -229,10 +217,20 @@ fun OcarinaApp() {
                         onInfo = { showInfo = true }, onLiked = { screen = Screen.LIKED },
                     )
                 }
+                AnimatedVisibility(
+                    visible = switchingTabs,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    enter = fadeIn(tween(25)), exit = fadeOut(tween(45)),
+                ) { ThreeDots() }
             }
         }
 
-        if (showFullPlayer && playback.currentSong != null) {
+        AnimatedVisibility(
+            visible = showFullPlayer && playback.currentSong != null,
+            enter = slideInVertically(animationSpec = tween(90), initialOffsetY = { it / 8 }) + fadeIn(tween(90)),
+            exit = slideOutVertically(animationSpec = tween(90), targetOffsetY = { it / 8 }) + fadeOut(tween(90)),
+            modifier = Modifier.fillMaxSize().zIndex(1f),
+        ) {
             NativePlayerScreen(
                 playback = playback,
                 isFavorite = favorites.any { it.videoId == playback.currentSong?.videoId },
@@ -240,13 +238,77 @@ fun OcarinaApp() {
                 onClose = { showFullPlayer = false }, onNext = ::next, onPrevious = ::previous,
             )
         }
+        }
         if (showInfo) {
             AlertDialog(
                 onDismissRequest = { showInfo = false },
                 title = { Text("Ocarina") },
-                text = { Text("Versão 0.3.0. Seu perfil é local; login Firebase e integração com Psiu ainda não estão ativos. Reprodução experimental via fontes não oficiais do YouTube Music. Recursos de playlist e download serão adicionados futuramente.") },
+                text = { Text("Versão 0.3.2. Seu perfil é local; login Firebase e integração com Psiu ainda não estão ativos. Reprodução experimental via fontes não oficiais do YouTube Music. Recursos de playlist e download serão adicionados futuramente.") },
                 confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Entendi") } },
             )
+        }
+    }
+}
+
+
+/** Native lightweight navigation: no Material spring animation or double-composed page. */
+@Composable
+private fun FastNav(screen: Screen, onSelect: (Screen) -> Unit) {
+    val c = ocarinaColors
+    val tabs = remember {
+        listOf(
+            Triple(Screen.HOME, "Início", LucideR.drawable.lucide_ic_house),
+            Triple(Screen.SEARCH, "Buscar", LucideR.drawable.lucide_ic_search),
+            Triple(Screen.LIBRARY, "Biblioteca", LucideR.drawable.lucide_ic_library),
+            Triple(Screen.LIKED, "Curtidas", LucideR.drawable.lucide_ic_heart),
+        )
+    }
+    Row(
+        Modifier.fillMaxWidth().height(70.dp).background(c.background).padding(horizontal = 7.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        tabs.forEach { (tab, label, drawable) ->
+            val active = tab == screen
+            val tint by animateColorAsState(
+                targetValue = if (active) c.accent else c.muted,
+                animationSpec = tween(90), label = "navigation-icon",
+            )
+            Column(
+                Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(15.dp))
+                    .clickable { if (screen != tab) onSelect(tab) },
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    Modifier.size(width = 55.dp, height = 32.dp).clip(RoundedCornerShape(18.dp))
+                        .background(if (active) c.softAccent else Color.Transparent),
+                    contentAlignment = Alignment.Center,
+                ) { LIcon(drawable, label, Modifier.size(21.dp), tint) }
+                Text(label, fontSize = 10.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    color = tint, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** Tiny three-dot 90ms navigation indicator. Shapes, not Unicode glyphs. */
+@Composable
+private fun ThreeDots() {
+    val c = ocarinaColors
+    var active by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        repeat(3) { step -> active = step; delay(30) }
+    }
+    Row(
+        modifier = Modifier.padding(top = 8.dp).clip(RoundedCornerShape(12.dp))
+            .background(c.surface).padding(horizontal = 13.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        repeat(3) { index ->
+            Box(Modifier.size(if (index == 1) 6.dp else 5.dp).clip(CircleShape)
+                .background(c.accent.copy(alpha = if (index == active) 1f else 0.30f)))
         }
     }
 }
@@ -264,8 +326,10 @@ private fun AppHeader(screen: Screen, onProfile: () -> Unit, onBack: () -> Unit,
             OcarinaMark(Modifier.size(48.dp))
         }
         Spacer(Modifier.width(6.dp))
-        Text(if (screen == Screen.PROFILE) "Perfil" else "Ocarina", color = c.text,
-            fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp)
+        if (screen == Screen.PROFILE) {
+            Text("Perfil", color = c.text, fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold, letterSpacing = (-0.25).sp)
+        }
         Spacer(Modifier.weight(1f))
         if (screen != Screen.SEARCH && screen != Screen.PROFILE) {
             IconButton(onClick = onSearch) { LIcon(LucideR.drawable.lucide_ic_search, "Buscar", Modifier.size(22.dp)) }
@@ -284,11 +348,12 @@ private fun AppHeader(screen: Screen, onProfile: () -> Unit, onBack: () -> Unit,
 private fun Greeting() {
     val time = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
     val greeting = when (time) { in 5..11 -> "Bom dia"; in 12..17 -> "Boa tarde"; else -> "Boa noite" }
-    Text(greeting, color = ocarinaColors.text, fontSize = 33.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1.3).sp)
+    Text(greeting, color = ocarinaColors.text, fontSize = 33.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.65).sp)
 }
 
 @Composable
 private fun HomePage(
+    listState: LazyListState,
     songs: List<Song>, recent: List<Song>, favorites: List<Song>,
     loading: Boolean, error: String?, onRetry: () -> Unit,
     onPlay: (Song, List<Song>) -> Unit, onFavorite: (Song) -> Unit,
@@ -296,7 +361,7 @@ private fun HomePage(
 ) {
     val c = ocarinaColors
     LazyColumn(
-        Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize(), state = listState,
         contentPadding = PaddingValues(start = 21.dp, end = 21.dp, top = 12.dp, bottom = 30.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
@@ -382,8 +447,7 @@ private fun ArtworkCard(song: Song, onClick: () -> Unit, wide: Boolean = false) 
     val size = if (wide) 178.dp else 142.dp
     Column(Modifier.width(size).clickable(onClick = onClick)) {
         Box(Modifier.size(size).clip(RoundedCornerShape(19.dp)).background(c.artworkSurface)) {
-            AsyncImage(model = song.artwork, contentDescription = song.title,
-                contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            AlbumArtwork(song, song.title, modifier = Modifier.fillMaxSize())
             Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).size(36.dp)
                 .clip(CircleShape).background(c.surface), contentAlignment = Alignment.Center) {
                 LIcon(LucideR.drawable.lucide_ic_play, "Tocar ${song.title}", Modifier.size(19.dp))
@@ -399,13 +463,14 @@ private fun ArtworkCard(song: Song, onClick: () -> Unit, wide: Boolean = false) 
 
 @Composable
 private fun SearchPage(
+    listState: LazyListState,
     text: String, onText: (String) -> Unit, songs: List<Song>, favorites: List<Song>,
     loading: Boolean, error: String?, onRetry: () -> Unit,
     onPlay: (Song) -> Unit, onFavorite: (Song) -> Unit,
 ) {
     val c = ocarinaColors
     LazyColumn(
-        Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
@@ -442,13 +507,14 @@ private fun SearchPage(
 
 @Composable
 private fun LibraryPage(
+    listState: LazyListState,
     favorites: List<Song>, recent: List<Song>,
     onLiked: () -> Unit, onPlay: (Song) -> Unit, onFavorite: (Song) -> Unit,
     onSearch: () -> Unit, onInfo: () -> Unit,
 ) {
     val c = ocarinaColors
     LazyColumn(
-        Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         item {
@@ -494,10 +560,10 @@ private fun LibraryEntry(@DrawableRes icon: Int, title: String, subtitle: String
 }
 
 @Composable
-private fun LikedPage(favorites: List<Song>, onPlay: (Song) -> Unit, onFavorite: (Song) -> Unit, onExplore: () -> Unit) {
+private fun LikedPage(listState: LazyListState, favorites: List<Song>, onPlay: (Song) -> Unit, onFavorite: (Song) -> Unit, onExplore: () -> Unit) {
     val c = ocarinaColors
     LazyColumn(
-        Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {
@@ -639,7 +705,7 @@ private fun SongRow(song: Song, isFavorite: Boolean, onOpen: () -> Unit, onFavor
             .clickable(onClick = onOpen).padding(vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AsyncImage(model = song.artwork, contentDescription = song.title, contentScale = ContentScale.Crop,
+        AlbumArtwork(song, song.title, small = true,
             modifier = Modifier.size(57.dp).clip(RoundedCornerShape(13.dp)).background(c.artworkSurface))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
@@ -711,8 +777,7 @@ private fun MiniPlayer(song: Song, playback: PlaybackConnector, onExpand: () -> 
         .clip(RoundedCornerShape(16.dp)).background(c.elevated)) {
         Row(Modifier.fillMaxWidth().clickable(onClick = onExpand).padding(horizontal = 10.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            AsyncImage(model = song.artwork, contentDescription = null, contentScale = ContentScale.Crop,
-                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(9.dp)))
+            AlbumArtwork(song, small = true, modifier = Modifier.size(44.dp).clip(RoundedCornerShape(9.dp)))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis, color = c.text, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -745,7 +810,7 @@ private fun NativePlayerScreen(
 ) {
     val song = playback.currentSong ?: return
     val c = ocarinaColors
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Box(Modifier.fillMaxSize().background(c.background)) {
         Column(
             Modifier.fillMaxSize().background(c.background).statusBarsPadding().navigationBarsPadding()
                 .padding(horizontal = 26.dp, vertical = 16.dp),
@@ -756,7 +821,7 @@ private fun NativePlayerScreen(
                 Spacer(Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("TOCANDO AGORA", color = c.muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                    Text("Ocarina", color = c.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    OcarinaMark(Modifier.size(19.dp), c.text)
                 }
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = onClose) { LIcon(LucideR.drawable.lucide_ic_ellipsis, "Minimizar", Modifier.size(22.dp)) }
@@ -764,9 +829,8 @@ private fun NativePlayerScreen(
             Spacer(Modifier.weight(0.5f))
             BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 val coverSize = minOf(maxWidth, 365.dp)
-                AsyncImage(model = song.artwork, contentDescription = "Capa de ${song.title}",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(coverSize).shadow(15.dp, RoundedCornerShape(23.dp))
+                AlbumArtwork(song, "Capa de ${song.title}", highQuality = true,
+                    modifier = Modifier.size(coverSize).shadow(6.dp, RoundedCornerShape(23.dp))
                         .clip(RoundedCornerShape(23.dp)).background(c.artworkSurface))
             }
             Spacer(Modifier.weight(0.65f))
@@ -786,6 +850,11 @@ private fun NativePlayerScreen(
             if (playback.error != null) {
                 Spacer(Modifier.height(8.dp))
                 Text(playback.error.orEmpty(), color = c.accent, fontSize = 12.sp)
+                TextButton(onClick = { playback.retryCurrent() }) {
+                    LIcon(LucideR.drawable.lucide_ic_refresh_cw, null, Modifier.size(16.dp), c.accent)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Tentar novamente", color = c.accent)
+                }
             }
             Spacer(Modifier.height(14.dp))
             val duration = playback.durationMs.coerceAtLeast(1L)
@@ -820,7 +889,7 @@ private fun NativePlayerScreen(
             Spacer(Modifier.weight(0.35f))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 LIcon(LucideR.drawable.lucide_ic_audio_lines, null, Modifier.size(21.dp), c.muted)
-                Text(if (playback.sourceBitrateKbps > 0) "Áudio original: ${playback.sourceBitrateKbps} kbps (estimado)"
+                Text(if (playback.sourceBitrateKbps > 0) "Fonte: ~${playback.sourceBitrateKbps} kbps"
                     else "Áudio original da fonte", color = c.muted, fontSize = 11.sp)
                 LIcon(LucideR.drawable.lucide_ic_list_music, null, Modifier.size(21.dp), c.muted)
             }

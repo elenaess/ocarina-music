@@ -75,7 +75,9 @@ object AudioSourceResolver {
             .maxByOrNull { it.bitrate }
             ?: throw IOException("Nenhuma fonte de áudio disponível para esta música.")
         val url = stream.content ?: throw IOException("URL de áudio vazia.")
-        return ResolvedAudio(url, stream.bitrate.coerceAtLeast(0))
+        // NewPipe's bitrate is usually bits/second; the UI label is kilobits/second.
+        val bitrate = stream.bitrate.coerceAtLeast(0)
+        return ResolvedAudio(url, if (bitrate >= 1000) (bitrate / 1000) else bitrate)
     }
 }
 

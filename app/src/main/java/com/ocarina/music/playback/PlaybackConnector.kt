@@ -64,7 +64,9 @@ class PlaybackConnector(context: Context) {
                 (error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
                     error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED)) {
                 retryingSource = true
-                play(currentSong!!, null, refresh = true, isRetry = true)
+                // Schedule outside Media3's callback, avoiding reentrant player mutation.
+                val failed = currentSong!!
+                scope.launch { play(failed, refresh = true, isRetry = true) }
             } else {
                 this@PlaybackConnector.error = "Não foi possível reproduzir: ${error.errorCodeName}."
                 buffering = false
@@ -91,7 +93,7 @@ class PlaybackConnector(context: Context) {
                     positionMs = it.currentPosition.coerceAtLeast(0)
                     durationMs = it.duration.takeIf { d -> d != C.TIME_UNSET && d > 0 } ?: 0L
                 }
-                delay(500)
+                delay(800)
             }
         }
     }
@@ -117,6 +119,10 @@ class PlaybackConnector(context: Context) {
         if (!isRetry) retryingSource = false
         currentSong = song
         sourceBitrateKbps = 0L
+        // Stop old audio immediately; a newly tapped search result must not keep it audible.
+        controller?.pause()
+        controller?.stop()
+        controller?.clearMediaItems()
         resolvingAudio = true
         error = null
         resolving = scope.launch {
@@ -159,6 +165,9 @@ class PlaybackConnector(context: Context) {
         }
     }
 
+    fun retryCurrent() {
+        currentSong?.let { song -> play(song, refresh = true) }
+    }
     fun toggle() {
         controller?.let { if (it.isPlaying) it.pause() else it.play() }
     }

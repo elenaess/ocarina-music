@@ -8,10 +8,10 @@ gh auth setup-git
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 git clone --branch main --single-branch "$REPO" "$WORKDIR/ocarina-music"
-(cd "$SOURCE_DIR" && tar --exclude='./.git' -cf - .) | (cd "$WORKDIR/ocarina-music" && tar -xf -)
+(cd "$SOURCE_DIR" && tar --mtime='@0' --exclude='./.git' -cf - .) | (cd "$WORKDIR/ocarina-music" && tar -xf -)
 cd "$WORKDIR/ocarina-music"
 git add -A
 if git diff --cached --quiet; then echo 'Sem mudanças novas.'; exit 0; fi
-git -c user.name='elenaess' -c user.email='289515223+elenaess@users.noreply.github.com' commit -m 'feat: Ocarina visual redesign, light dark themes and profile (v0.3.0)'
+git -c user.name='elenaess' -c user.email='289515223+elenaess@users.noreply.github.com' commit -m 'perf: fluid navigation, artwork and stable player (v0.3.2)'
 git push origin main
 echo 'Pronto: https://github.com/elenaess/ocarina-music/actions'
