@@ -3,6 +3,7 @@ package com.ocarina.music.playback
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
@@ -33,7 +34,7 @@ class OcarinaPlaybackService : MediaSessionService() {
             .setAllowCrossProtocolRedirects(true)
         val dataSourceFactory = CacheDataSource.Factory()
             .setCache(simpleCache)
-            .setUpstreamDataSourceFactory(httpFactory)
+            .setUpstreamDataSourceFactory(DefaultDataSource.Factory(this, httpFactory))
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         val buffer = DefaultLoadControl.Builder()
             .setBufferDurationsMs(10_000, 35_000, 500, 1_500)

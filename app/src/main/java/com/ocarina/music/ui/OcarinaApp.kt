@@ -1,6 +1,9 @@
 package com.ocarina.music.ui
 
 import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.activity.compose.BackHandler
@@ -50,6 +53,11 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowInsetsControllerCompat
 import com.ocarina.music.R
 import com.composables.icons.lucide.R as LucideR
+import com.ocarina.music.data.CatalogEntry
+import com.ocarina.music.data.CatalogKind
+import com.ocarina.music.data.OcarinaOfflineStore
+import com.ocarina.music.data.OcarinaPlaylist
+import com.ocarina.music.data.OcarinaPlaylistStore
 import com.ocarina.music.data.FavoritesStore
 import com.ocarina.music.data.OcarinaSettings
 import com.ocarina.music.data.OcarinaAccount
@@ -58,9 +66,15 @@ import com.ocarina.music.data.YouTubeMusicSearch
 import com.ocarina.music.playback.PlaybackConnector
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
-private enum class Screen { HOME, SEARCH, LIBRARY, LIKED, PROFILE }
+private enum class Screen {
+    HOME, SEARCH, LIBRARY, LIKED, PROFILE, PLAYLISTS, PLAYLIST_DETAIL,
+    ARTISTS, ALBUMS, CATALOG_DETAIL, DOWNLOADS
+}
 
 /** Every interface icon is a Lucide vector resource. The brand mark is its own vector. */
 @Composable
@@ -119,19 +133,110 @@ fun OcarinaApp() {
         var queue by remember { mutableStateOf<List<Song>>(emptyList()) }
         var switchingTabs by remember { mutableStateOf(false) }
         var syncedAccount by remember { mutableStateOf<String?>(null) }
-        BackHandler(enabled = showFullPlayer || showInfo || screen != Screen.HOME) {
-            when {
-                showInfo -> showInfo = false
-                showFullPlayer -> showFullPlayer = false
-                screen == Screen.PROFILE -> screen = previousScreen
-                else -> screen = Screen.HOME
+        val playlistStore = remember(context) { OcarinaPlaylistStore(context) }
+        val offlineStore = remember(context) { OcarinaOfflineStore(context) }
+        val coroutineScope = rememberCoroutineScope()
+        var playlists by remember { mutableStateOf(playlistStore.load(account.user?.uid)) }
+        var offlineSongs by remember { mutableStateOf(offlineStore.load()) }
+        var importing by remember { mutableStateOf(false) }
+        var importMessage by remember { mutableStateOf<String?>(null) }
+        var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
+        var playlistReturnScreen by remember { mutableStateOf(Screen.PLAYLISTS) }
+        var addToPlaylist by remember { mutableStateOf<Song?>(null) }
+        var creatingPlaylist by remember { mutableStateOf(false) }
+        var newPlaylistName by remember { mutableStateOf("") }
+        var songForNewPlaylist by remember { mutableStateOf<Song?>(null) }
+        var showQueue by remember { mutableStateOf(false) }
+        var selectedCatalog by remember { mutableStateOf<CatalogEntry?>(null) }
+        var catalogQuery by remember { mutableStateOf("") }
+        var catalogResults by remember { mutableStateOf<List<CatalogEntry>>(emptyList()) }
+        var catalogLoading by remember { mutableStateOf(false) }
+        var catalogError by remember { mutableStateOf<String?>(null) }
+        var detailSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
+        var detailLoading by remember { mutableStateOf(false) }
+        var detailError by remember { mutableStateOf<String?>(null) }
+        val offlinePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+            if (uris.isNotEmpty() && !importing) {
+                coroutineScope.launch {
+                    importing = true
+                    try {
+                        val imported = withContext(Dispatchers.IO) { offlineStore.import(uris) }
+                        offlineSongs = offlineStore.load()
+                        importMessage = if (imported.isEmpty()) "Nenhum arquivo compatível foi importado."
+                            else "${imported.size} arquivo(s) salvos offline."
+                    } catch (e: Exception) { importMessage = e.localizedMessage ?: "Falha na importação." }
+                    finally { importing = false }
+                }
             }
         }
+        fun savePlaylists(items: List<OcarinaPlaylist>) {
+            playlists = items
+            playlistStore.save(account.user?.uid, items)
+        }
+        fun updatePlaylist(list: OcarinaPlaylist) {
+            savePlaylists(playlists.map { if (it.id == list.id) list else it })
+        }
+        fun putInPlaylist(list: OcarinaPlaylist, song: Song) {
+            updatePlaylist(list.copy(songs = (list.songs + song).distinctBy { it.videoId }))
+        }
+        fun addToQueue(song: Song) {
+            if (queue.none { it.videoId == song.videoId }) queue = queue + song
+            Toast.makeText(context, "Adicionada à fila", Toast.LENGTH_SHORT).show()
+        }
+        fun shareText(title: String, body: String) {
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, body)
+            }
+            runCatching { context.startActivity(Intent.createChooser(intent, title)) }
+        }
+        fun songLink(song: Song): String = if (song.videoId.matches(Regex("[A-Za-z0-9_-]{11}")))
+            "https://music.youtube.com/watch?v=${song.videoId}" else "Áudio pessoal no Ocarina"
+        fun shareSong(song: Song) {
+            shareText("Compartilhar música", "${song.title} — ${song.artist}\n${songLink(song)}")
+        }
+        fun sharePlaylist(list: OcarinaPlaylist) {
+            val songsList = list.songs.take(50).mapIndexed { i, song ->
+                "${i + 1}. ${song.title} — ${song.artist}\n${songLink(song)}"
+            }.joinToString("\n")
+            shareText("Compartilhar playlist", "Playlist ${list.name} • Ocarina\n\n$songsList")
+        }
+        fun openCatalog(kind: CatalogKind) {
+            catalogQuery = ""
+            catalogResults = emptyList()
+            catalogError = null
+            screen = if (kind == CatalogKind.ARTIST) Screen.ARTISTS else Screen.ALBUMS
+        }
+        fun openCatalogDetail(item: CatalogEntry) {
+            selectedCatalog = item
+            detailSongs = emptyList()
+            detailError = null
+            screen = Screen.CATALOG_DETAIL
+        }
+        fun goBack() {
+            when {
+                showInfo -> showInfo = false
+                showQueue -> showQueue = false
+                creatingPlaylist -> { creatingPlaylist = false; songForNewPlaylist = null }
+                addToPlaylist != null -> addToPlaylist = null
+                showFullPlayer -> showFullPlayer = false
+                screen == Screen.PLAYLIST_DETAIL -> screen = playlistReturnScreen
+                screen == Screen.CATALOG_DETAIL -> screen = if (selectedCatalog?.kind == CatalogKind.ARTIST)
+                    Screen.ARTISTS else Screen.ALBUMS
+                screen == Screen.PLAYLISTS || screen == Screen.ARTISTS ||
+                    screen == Screen.ALBUMS || screen == Screen.DOWNLOADS -> screen = Screen.LIBRARY
+                screen == Screen.PROFILE -> screen = previousScreen
+                screen != Screen.HOME -> screen = Screen.HOME
+            }
+        }
+        BackHandler(enabled = showFullPlayer || showInfo || showQueue || creatingPlaylist ||
+            addToPlaylist != null || screen != Screen.HOME) { goBack() }
         // Keep guest favourites local; cloud favourites are scoped to each signed-in user.
         LaunchedEffect(account.user?.uid) {
             syncedAccount = null
             favorites.clear()
             favorites.addAll(store.load(account.user?.uid))
+            playlists = playlistStore.load(account.user?.uid)
         }
         LaunchedEffect(account.user?.uid, account.favoritesReady, account.cloudFavorites) {
             val uid = account.user?.uid ?: return@LaunchedEffect
@@ -180,7 +285,9 @@ fun OcarinaApp() {
         }
         fun next() {
             val i = queue.indexOfFirst { it.videoId == playback.currentSong?.videoId }
-            queue.getOrNull(i + 1)?.let { playback.play(it, queue.getOrNull(i + 2)) }
+            val nextSong = queue.getOrNull(i + 1)
+                ?: if (playback.repeatMode == 2) queue.firstOrNull() else null
+            nextSong?.let { playback.play(it) }
         }
         fun previous() {
             val i = queue.indexOfFirst { it.videoId == playback.currentSong?.videoId }
@@ -207,6 +314,47 @@ fun OcarinaApp() {
             finally { searchLoading = false }
         }
 
+        LaunchedEffect(screen, catalogQuery) {
+            if (screen != Screen.ARTISTS && screen != Screen.ALBUMS) return@LaunchedEffect
+            val query = catalogQuery.trim()
+            if (query.isBlank()) { catalogResults = emptyList(); catalogError = null; catalogLoading = false; return@LaunchedEffect }
+            delay(270)
+            catalogLoading = true; catalogError = null
+            try {
+                catalogResults = searchClient.findCollections(query,
+                    if (screen == Screen.ARTISTS) CatalogKind.ARTIST else CatalogKind.ALBUM)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { catalogResults = emptyList(); catalogError = e.localizedMessage ?: "Erro do catálogo." }
+            finally { catalogLoading = false }
+        }
+        LaunchedEffect(selectedCatalog?.browseId, screen) {
+            if (screen != Screen.CATALOG_DETAIL) return@LaunchedEffect
+            val item = selectedCatalog ?: return@LaunchedEffect
+            if (item.browseId.startsWith("local:")) {
+                detailSongs = (favorites + recent + searchSongs + offlineSongs).distinctBy { it.videoId }
+                    .filter { song -> if (item.kind == CatalogKind.ARTIST) song.artist.equals(item.name, true)
+                        else song.album.equals(item.name, true) }
+                detailLoading = false
+                detailError = null
+                return@LaunchedEffect
+            }
+            detailLoading = true; detailSongs = emptyList(); detailError = null
+            try {
+                detailSongs = searchClient.browseSongs(item.browseId).map { song ->
+                    if (item.kind == CatalogKind.ALBUM) song.copy(album = item.name) else song
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { detailError = e.localizedMessage ?: "Não foi possível abrir." }
+            finally { detailLoading = false }
+        }
+        SideEffect {
+            playback.onTrackEnded = { ended ->
+                val position = queue.indexOfFirst { it.videoId == ended.videoId }
+                val candidate = if (position < 0) null else queue.getOrNull(position + 1)
+                    ?: if (playback.repeatMode == 2) queue.firstOrNull() else null
+                if (candidate != null) playback.play(candidate)
+            }
+        }
         Box(Modifier.fillMaxSize()) {
         if (!showFullPlayer || playback.currentSong == null) {
         Scaffold(
@@ -215,7 +363,7 @@ fun OcarinaApp() {
                 AppHeader(
                     screen = screen,
                     onProfile = ::openProfile,
-                    onBack = { screen = previousScreen },
+                    onBack = ::goBack,
                     onSearch = { screen = Screen.SEARCH },
                 )
             },
@@ -233,12 +381,18 @@ fun OcarinaApp() {
                     Screen.HOME -> HomePage(
                         listState = homeScroll,
                         songs = discoverSongs, recent = recent, favorites = favorites,
+                        playlists = playlists, onOpenPlaylist = {
+                            selectedPlaylistId = it.id
+                            playlistReturnScreen = Screen.HOME
+                            screen = Screen.PLAYLIST_DETAIL
+                        },
                         loading = discoveryLoading, error = discoverError,
                         onRetry = { discoverRefresh++ },
                         onPlay = { song, source -> playSong(song, source) },
                         onFavorite = ::toggleFavorite,
                         onSearch = { screen = Screen.SEARCH },
                         onLibrary = { screen = Screen.LIBRARY },
+                        onQueue = ::addToQueue, onPlaylist = { addToPlaylist = it }, onShare = ::shareSong,
                     )
                     Screen.SEARCH -> SearchPage(
                         listState = searchScroll,
@@ -246,22 +400,96 @@ fun OcarinaApp() {
                         favorites = favorites, loading = searchLoading, error = searchError,
                         onRetry = { searchRefresh++ },
                         onPlay = { song -> playSong(song, searchSongs) }, onFavorite = ::toggleFavorite,
+                        onQueue = ::addToQueue, onPlaylist = { addToPlaylist = it }, onShare = ::shareSong,
                     )
                     Screen.LIBRARY -> LibraryPage(
                         listState = libraryScroll,
                         favorites = favorites, recent = recent,
                         onLiked = { screen = Screen.LIKED }, onPlay = { song -> playSong(song, recent) },
-                        onFavorite = ::toggleFavorite, onSearch = { screen = Screen.SEARCH }, onInfo = { showInfo = true },
+                        onFavorite = ::toggleFavorite, onSearch = { screen = Screen.SEARCH },
+                        onPlaylists = { screen = Screen.PLAYLISTS }, onDownloads = { screen = Screen.DOWNLOADS },
+                        onArtists = { openCatalog(CatalogKind.ARTIST) }, onAlbums = { openCatalog(CatalogKind.ALBUM) },
+                        onQueue = ::addToQueue, onPlaylist = { addToPlaylist = it }, onShare = ::shareSong,
                     )
                     Screen.LIKED -> LikedPage(
                         listState = likedScroll,
                         favorites = favorites, onPlay = { song -> playSong(song, favorites.toList()) },
                         onFavorite = ::toggleFavorite, onExplore = { screen = Screen.SEARCH },
+                        onQueue = ::addToQueue, onPlaylist = { addToPlaylist = it }, onShare = ::shareSong,
                     )
                     Screen.PROFILE -> ProfilePage(
                         account = account, isDark = dark, favorites = favorites.size, recent = recent.size,
                         onTheme = { value -> dark = value; settings.setDark(value) },
                         onInfo = { showInfo = true }, onLiked = { screen = Screen.LIKED },
+                        playlistCount = playlists.size, onPlaylists = { screen = Screen.PLAYLISTS },
+                        onShare = {
+                            shareText("Compartilhar perfil",
+                                "Perfil Ocarina: ${account.displayName.ifBlank { account.user?.displayName ?: "Usuário" }}")
+                        },
+                    )
+                    Screen.PLAYLISTS -> OcarinaPlaylistsPage(playlists,
+                        onCreate = { creatingPlaylist = true },
+                        onOpen = {
+                            selectedPlaylistId = it.id
+                            playlistReturnScreen = Screen.PLAYLISTS
+                            screen = Screen.PLAYLIST_DETAIL
+                        })
+                    Screen.PLAYLIST_DETAIL -> {
+                        val list = playlists.firstOrNull { it.id == selectedPlaylistId }
+                        if (list != null) OcarinaPlaylistDetailPage(list,
+                            onCoverSelected = { uri ->
+                                coroutineScope.launch {
+                                    try {
+                                        val cover = withContext(Dispatchers.IO) { playlistStore.saveCover(list.id, uri) }
+                                        playlists.firstOrNull { it.id == list.id }?.let { current ->
+                                            updatePlaylist(current.copy(cover = cover))
+                                        }
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, e.localizedMessage ?: "Erro na capa", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            },
+                            onRename = { updatePlaylist(list.copy(name = it.trim().take(80))) },
+                            onDelete = { savePlaylists(playlists.filterNot { it.id == list.id }); screen = Screen.PLAYLISTS },
+                            onShare = { sharePlaylist(list) },
+                            onPlay = { song -> playSong(song, list.songs) },
+                            onRemove = { song -> updatePlaylist(list.copy(songs = list.songs.filterNot { it.videoId == song.videoId })) },
+                            onAdd = {
+                                screen = Screen.SEARCH
+                                Toast.makeText(context, "Na Busca, abra os três pontos da faixa e escolha Playlist.",
+                                    Toast.LENGTH_LONG).show()
+                            },
+                        )
+                    }
+                    Screen.ARTISTS, Screen.ALBUMS -> {
+                        val kind = if (screen == Screen.ARTISTS) CatalogKind.ARTIST else CatalogKind.ALBUM
+                        val local = (favorites + recent + offlineSongs).distinctBy { it.videoId }
+                        val grouped = if (kind == CatalogKind.ARTIST) local.groupBy { it.artist }
+                            else local.filter { it.album.isNotBlank() }.groupBy { it.album }
+                        val entries = grouped.map { (name, songs) ->
+                            CatalogEntry("local:${kind.name}:${name}", name,
+                                if (kind == CatalogKind.ARTIST) "Artista salvo" else "Álbum salvo",
+                                songs.firstOrNull()?.artwork.orEmpty(), kind)
+                        }
+                        OcarinaCatalogBrowsePage(kind, catalogQuery, { catalogQuery = it },
+                            catalogResults, catalogLoading, catalogError, entries, ::openCatalogDetail)
+                    }
+                    Screen.CATALOG_DETAIL -> selectedCatalog?.let { entry ->
+                        OcarinaCatalogDetailPage(entry, detailSongs, detailLoading, detailError,
+                            onPlay = { song -> playSong(song, detailSongs) },
+                            onShare = {
+                                shareText("Compartilhar ${entry.kind.name.lowercase()}",
+                                    "${entry.name} • Ocarina" +
+                                        if (entry.browseId.startsWith("local:")) ""
+                                        else "\nhttps://music.youtube.com/browse/${entry.browseId}")
+                            },
+                            onQueue = ::addToQueue,
+                            onSave = { addToPlaylist = it })
+                    }
+                    Screen.DOWNLOADS -> OcarinaOfflinePage(offlineSongs, importing,
+                        onImport = { offlinePicker.launch(arrayOf("audio/*")) },
+                        onPlay = { song -> playSong(song, offlineSongs) },
+                        onRemove = { offlineStore.remove(it); offlineSongs = offlineStore.load() },
                     )
                 }
                 if (switchingTabs) Box(Modifier.matchParentSize().background(c.accent.copy(alpha = 0.035f)))
@@ -279,14 +507,47 @@ fun OcarinaApp() {
                 isFavorite = favorites.any { it.videoId == playback.currentSong?.videoId },
                 onFavorite = { playback.currentSong?.let(::toggleFavorite) },
                 onClose = { showFullPlayer = false }, onNext = ::next, onPrevious = ::previous,
+                onQueue = { showQueue = true },
+                onRepeat = { playback.cycleRepeat() },
+                onShare = { playback.currentSong?.let(::shareSong) },
             )
         }
         }
+        if (showQueue) OcarinaQueueDialog(queue, playback.currentSong?.videoId, playback.repeatMode,
+            onSelect = { song -> showQueue = false; playSong(song, queue) },
+            onRemove = { song -> queue = queue.filterNot { it.videoId == song.videoId } },
+            onDismiss = { showQueue = false })
+        addToPlaylist?.let { song ->
+            OcarinaPickPlaylistDialog(playlists, song,
+                onPick = { list -> putInPlaylist(list, song); addToPlaylist = null },
+                onCreate = { songForNewPlaylist = song; creatingPlaylist = true; addToPlaylist = null },
+                onDismiss = { addToPlaylist = null })
+        }
+        if (creatingPlaylist) AlertDialog(onDismissRequest = { creatingPlaylist = false; songForNewPlaylist = null },
+            title = { Text("Nova playlist") },
+            text = { OutlinedTextField(value = newPlaylistName,
+                onValueChange = { newPlaylistName = it.take(80) },
+                singleLine = true, label = { Text("Nome") }) },
+            confirmButton = { TextButton(onClick = {
+                val list = playlistStore.create(newPlaylistName).copy(
+                    songs = songForNewPlaylist?.let(::listOf).orEmpty())
+                songForNewPlaylist = null
+                savePlaylists(listOf(list) + playlists)
+                selectedPlaylistId = list.id
+                playlistReturnScreen = Screen.PLAYLISTS
+                creatingPlaylist = false
+                newPlaylistName = ""
+                screen = Screen.PLAYLIST_DETAIL
+            }, enabled = newPlaylistName.isNotBlank()) { Text("Criar") } },
+            dismissButton = { TextButton(onClick = { creatingPlaylist = false; songForNewPlaylist = null }) { Text("Cancelar") } })
+        if (importMessage != null) AlertDialog(onDismissRequest = { importMessage = null },
+            title = { Text("Downloads") }, text = { Text(importMessage.orEmpty()) },
+            confirmButton = { TextButton(onClick = { importMessage = null }) { Text("Entendi") } })
         if (showInfo) {
             AlertDialog(
                 onDismissRequest = { showInfo = false },
                 title = { Text("Ocarina") },
-                text = { Text("Versão 0.4.2. Contas Google e e-mail pelo Firebase, foto e favoritos no Firestore. Psiu ainda não está integrado. Reprodução experimental via fontes externas.") },
+                text = { Text("Versão 0.4.3. Contas Google e e-mail pelo Firebase, foto e favoritos no Firestore. Psiu ainda não está integrado. Reprodução experimental via fontes externas.") },
                 confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Entendi") } },
             )
         }
@@ -360,21 +621,30 @@ private fun AppHeader(screen: Screen, onProfile: () -> Unit, onBack: () -> Unit,
         Modifier.fillMaxWidth().statusBarsPadding().padding(start = 18.dp, end = 18.dp, top = 13.dp, bottom = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (screen == Screen.PROFILE) {
+        val nested = screen in setOf(Screen.PROFILE, Screen.PLAYLISTS, Screen.PLAYLIST_DETAIL,
+            Screen.ARTISTS, Screen.ALBUMS, Screen.CATALOG_DETAIL, Screen.DOWNLOADS)
+        if (nested) {
             IconButton(onClick = onBack) { LIcon(LucideR.drawable.lucide_ic_arrow_left, "Voltar", Modifier.size(23.dp)) }
-        } else {
-            OcarinaMark(Modifier.size(48.dp))
-        }
+        } else OcarinaMark(Modifier.size(48.dp))
         Spacer(Modifier.width(6.dp))
-        if (screen == Screen.PROFILE) {
-            Text("Perfil", color = c.text, fontSize = 20.sp,
+        if (nested) {
+            val header = when (screen) {
+                Screen.PROFILE -> "Perfil"
+                Screen.PLAYLISTS, Screen.PLAYLIST_DETAIL -> "Playlists"
+                Screen.ARTISTS -> "Artistas"
+                Screen.ALBUMS -> "Álbuns"
+                Screen.CATALOG_DETAIL -> "Explorar"
+                Screen.DOWNLOADS -> "Downloads"
+                else -> "Ocarina"
+            }
+            Text(header, color = c.text, fontSize = 20.sp,
                 fontWeight = FontWeight.SemiBold, letterSpacing = (-0.25).sp)
         }
         Spacer(Modifier.weight(1f))
-        if (screen != Screen.SEARCH && screen != Screen.PROFILE) {
+        if (!nested && screen != Screen.SEARCH) {
             IconButton(onClick = onSearch) { LIcon(LucideR.drawable.lucide_ic_search, "Buscar", Modifier.size(22.dp)) }
         }
-        if (screen != Screen.PROFILE) {
+        if (!nested) {
             IconButton(onClick = onProfile) {
                 Box(Modifier.size(37.dp).clip(CircleShape).background(c.elevated), contentAlignment = Alignment.Center) {
                     LIcon(LucideR.drawable.lucide_ic_user_round, "Abrir perfil", Modifier.size(19.dp))
@@ -388,9 +658,11 @@ private fun AppHeader(screen: Screen, onProfile: () -> Unit, onBack: () -> Unit,
 private fun HomePage(
     listState: LazyListState,
     songs: List<Song>, recent: List<Song>, favorites: List<Song>,
+    playlists: List<OcarinaPlaylist>, onOpenPlaylist: (OcarinaPlaylist) -> Unit,
     loading: Boolean, error: String?, onRetry: () -> Unit,
     onPlay: (Song, List<Song>) -> Unit, onFavorite: (Song) -> Unit,
     onSearch: () -> Unit, onLibrary: () -> Unit,
+    onQueue: (Song) -> Unit, onPlaylist: (Song) -> Unit, onShare: (Song) -> Unit,
 ) {
     val c = ocarinaColors
     LazyColumn(
@@ -431,13 +703,33 @@ private fun HomePage(
                 }
             }
         }
+        if (playlists.isNotEmpty()) item {
+            Column {
+                SectionHeader("Suas playlists", onClick = onLibrary)
+                Spacer(Modifier.height(13.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(13.dp)) {
+                    items(playlists.take(6), key = { it.id }) { list ->
+                        Column(Modifier.width(125.dp).clickable { onOpenPlaylist(list) }) {
+                            OcarinaPlaylistCover(list, 125.dp)
+                            Spacer(Modifier.height(8.dp))
+                            Text(list.name, color = c.text, fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis)
+                            Text("${list.songs.size} músicas", color = c.muted, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
         item {
             Column {
                 SectionHeader("Músicas para explorar", onClick = onSearch)
                 Spacer(Modifier.height(12.dp))
                 songs.take(4).forEach { song ->
                     SongRow(song, favorites.any { it.videoId == song.videoId },
-                        onOpen = { onPlay(song, songs) }, onFavorite = { onFavorite(song) })
+                        onOpen = { onPlay(song, songs) }, onFavorite = { onFavorite(song) },
+                        onQueue = { onQueue(song) }, onPlaylist = { onPlaylist(song) },
+                        onShare = { onShare(song) })
                 }
             }
         }
@@ -481,6 +773,7 @@ private fun SearchPage(
     text: String, onText: (String) -> Unit, songs: List<Song>, favorites: List<Song>,
     loading: Boolean, error: String?, onRetry: () -> Unit,
     onPlay: (Song) -> Unit, onFavorite: (Song) -> Unit,
+    onQueue: (Song) -> Unit, onPlaylist: (Song) -> Unit, onShare: (Song) -> Unit,
 ) {
     val c = ocarinaColors
     LazyColumn(
@@ -514,7 +807,9 @@ private fun SearchPage(
         else if (songs.isEmpty()) item { EmptyPanel("Não encontramos resultados", "Tente outra música ou artista.", LucideR.drawable.lucide_ic_music_2) }
         else items(songs, key = { it.videoId }) { song ->
             SongRow(song, favorites.any { it.videoId == song.videoId },
-                onOpen = { onPlay(song) }, onFavorite = { onFavorite(song) })
+                onOpen = { onPlay(song) }, onFavorite = { onFavorite(song) },
+                onQueue = { onQueue(song) }, onPlaylist = { onPlaylist(song) },
+                onShare = { onShare(song) })
         }
     }
 }
@@ -524,7 +819,9 @@ private fun LibraryPage(
     listState: LazyListState,
     favorites: List<Song>, recent: List<Song>,
     onLiked: () -> Unit, onPlay: (Song) -> Unit, onFavorite: (Song) -> Unit,
-    onSearch: () -> Unit, onInfo: () -> Unit,
+    onSearch: () -> Unit, onPlaylists: () -> Unit, onDownloads: () -> Unit,
+    onArtists: () -> Unit, onAlbums: () -> Unit,
+    onQueue: (Song) -> Unit, onPlaylist: (Song) -> Unit, onShare: (Song) -> Unit,
 ) {
     val c = ocarinaColors
     LazyColumn(
@@ -535,10 +832,10 @@ private fun LibraryPage(
             Text("Sua Biblioteca", fontSize = 31.sp, fontWeight = FontWeight.SemiBold, color = c.text)
             Spacer(Modifier.height(17.dp))
             LibraryEntry(LucideR.drawable.lucide_ic_heart, "Músicas Curtidas", "${favorites.size} músicas", onLiked)
-            LibraryEntry(LucideR.drawable.lucide_ic_download, "Downloads", "Em desenvolvimento", onInfo)
-            LibraryEntry(LucideR.drawable.lucide_ic_list_music, "Playlists", "Em desenvolvimento", onInfo)
-            LibraryEntry(LucideR.drawable.lucide_ic_disc_3, "Álbuns", "Em desenvolvimento", onInfo)
-            LibraryEntry(LucideR.drawable.lucide_ic_user_round, "Artistas", "Em desenvolvimento", onInfo)
+            LibraryEntry(LucideR.drawable.lucide_ic_download, "Downloads", "Áudio offline do celular", onDownloads)
+            LibraryEntry(LucideR.drawable.lucide_ic_list_music, "Playlists", "Suas listas de escuta", onPlaylists)
+            LibraryEntry(LucideR.drawable.lucide_ic_disc_3, "Álbuns", "Capas e faixas", onAlbums)
+            LibraryEntry(LucideR.drawable.lucide_ic_user_round, "Artistas", "Explore o catálogo", onArtists)
         }
         item {
             Spacer(Modifier.height(9.dp))
@@ -549,7 +846,9 @@ private fun LibraryPage(
                 LucideR.drawable.lucide_ic_music_2, onSearch, "Explorar músicas")
         } else items(recent, key = { it.videoId }) { song ->
             SongRow(song, favorites.any { it.videoId == song.videoId },
-                onOpen = { onPlay(song) }, onFavorite = { onFavorite(song) })
+                onOpen = { onPlay(song) }, onFavorite = { onFavorite(song) },
+                onQueue = { onQueue(song) }, onPlaylist = { onPlaylist(song) },
+                onShare = { onShare(song) })
         }
     }
 }
@@ -574,7 +873,9 @@ private fun LibraryEntry(@DrawableRes icon: Int, title: String, subtitle: String
 }
 
 @Composable
-private fun LikedPage(listState: LazyListState, favorites: List<Song>, onPlay: (Song) -> Unit, onFavorite: (Song) -> Unit, onExplore: () -> Unit) {
+private fun LikedPage(listState: LazyListState, favorites: List<Song>, onPlay: (Song) -> Unit,
+    onFavorite: (Song) -> Unit, onExplore: () -> Unit,
+    onQueue: (Song) -> Unit, onPlaylist: (Song) -> Unit, onShare: (Song) -> Unit) {
     val c = ocarinaColors
     LazyColumn(
         modifier = Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
@@ -603,14 +904,17 @@ private fun LikedPage(listState: LazyListState, favorites: List<Song>, onPlay: (
                 LucideR.drawable.lucide_ic_heart, onExplore, "Encontrar músicas")
         }
         else items(favorites, key = { it.videoId }) { song ->
-            SongRow(song, true, onOpen = { onPlay(song) }, onFavorite = { onFavorite(song) })
+            SongRow(song, true, onOpen = { onPlay(song) }, onFavorite = { onFavorite(song) },
+                onQueue = { onQueue(song) }, onPlaylist = { onPlaylist(song) },
+                onShare = { onShare(song) })
         }
     }
 }
 
 @Composable
 private fun ProfilePage(account: OcarinaAccount, isDark: Boolean, favorites: Int, recent: Int,
-    onTheme: (Boolean) -> Unit, onInfo: () -> Unit, onLiked: () -> Unit) {
+    onTheme: (Boolean) -> Unit, onInfo: () -> Unit, onLiked: () -> Unit,
+    playlistCount: Int, onPlaylists: () -> Unit, onShare: () -> Unit) {
     val c = ocarinaColors
     val activity = LocalContext.current as? Activity
     var email by remember { mutableStateOf("") }
@@ -635,11 +939,13 @@ private fun ProfilePage(account: OcarinaAccount, isDark: Boolean, favorites: Int
         item {
             Column {
                 Column(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(25.dp)).background(c.surface)
-                        .padding(horizontal = 21.dp, vertical = 24.dp),
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(27.dp))
+                        .background(c.surface).padding(horizontal = 21.dp, vertical = 25.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Box(Modifier.size(99.dp).clip(CircleShape).background(c.softAccent), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(112.dp).clip(CircleShape).background(c.softAccent)
+                        .padding(5.dp).clip(CircleShape).background(c.elevated),
+                        contentAlignment = Alignment.Center) {
                         if (avatarBitmap != null) Image(
                             bitmap = avatarBitmap, contentDescription = "Sua foto de perfil",
                             contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -652,7 +958,7 @@ private fun ProfilePage(account: OcarinaAccount, isDark: Boolean, favorites: Int
                         )
                         else LIcon(LucideR.drawable.lucide_ic_user_round, "Avatar", Modifier.size(47.dp), c.accent)
                     }
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(16.dp))
                     if (account.user == null) {
                         Text("Entrar no Ocarina", color = c.text, fontSize = 23.sp, fontWeight = FontWeight.SemiBold)
                         Text("Sincronize suas curtidas e sua foto", color = c.muted, fontSize = 12.sp)
@@ -698,6 +1004,12 @@ private fun ProfilePage(account: OcarinaAccount, isDark: Boolean, favorites: Int
                             fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
                         Text(account.user?.email.orEmpty(), color = c.muted, fontSize = 12.sp)
                         Spacer(Modifier.height(12.dp))
+                        OutlinedButton(onClick = onShare, shape = RoundedCornerShape(14.dp)) {
+                            LIcon(LucideR.drawable.lucide_ic_share_2, null, Modifier.size(17.dp), c.accent)
+                            Spacer(Modifier.width(7.dp))
+                            Text("Compartilhar perfil")
+                        }
+                        Spacer(Modifier.height(8.dp))
                         OutlinedButton(onClick = { imagePicker.launch("image/*") }, enabled = !account.busy) {
                             LIcon(LucideR.drawable.lucide_ic_user_round, null, Modifier.size(17.dp), c.accent)
                             Spacer(Modifier.width(8.dp))
@@ -724,7 +1036,25 @@ private fun ProfilePage(account: OcarinaAccount, isDark: Boolean, favorites: Int
                         ProfileStat(favorites.toString(), "Curtidas")
                         Box(Modifier.width(1.dp).height(37.dp).background(c.outline))
                         ProfileStat(recent.toString(), "Recentes")
+                        Box(Modifier.width(1.dp).height(37.dp).background(c.outline))
+                        ProfileStat(playlistCount.toString(), "Playlists")
                     }
+                }
+            }
+        }
+        item {
+            Surface(onClick = onPlaylists, shape = RoundedCornerShape(21.dp), color = c.surface) {
+                Row(Modifier.fillMaxWidth().padding(17.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(c.softAccent),
+                        contentAlignment = Alignment.Center) {
+                        LIcon(LucideR.drawable.lucide_ic_list_music, null, Modifier.size(25.dp), c.accent)
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Minhas playlists", color = c.text, fontWeight = FontWeight.SemiBold)
+                        Text("${playlistCount} listas criadas", color = c.muted, fontSize = 12.sp)
+                    }
+                    LIcon(LucideR.drawable.lucide_ic_chevron_right, "Abrir", Modifier.size(20.dp), c.muted)
                 }
             }
         }
@@ -783,8 +1113,10 @@ private fun ProfileStat(value: String, caption: String) {
 }
 
 @Composable
-private fun SongRow(song: Song, isFavorite: Boolean, onOpen: () -> Unit, onFavorite: () -> Unit) {
+private fun SongRow(song: Song, isFavorite: Boolean, onOpen: () -> Unit, onFavorite: () -> Unit,
+    onQueue: (() -> Unit)? = null, onPlaylist: (() -> Unit)? = null, onShare: (() -> Unit)? = null) {
     val c = ocarinaColors
+    var menuExpanded by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onOpen).padding(vertical = 7.dp),
@@ -805,7 +1137,21 @@ private fun SongRow(song: Song, isFavorite: Boolean, onOpen: () -> Unit, onFavor
                 if (isFavorite) "Remover dos favoritos" else "Adicionar aos favoritos",
                 Modifier.size(20.dp), if (isFavorite) c.accent else c.muted)
         }
-        LIcon(LucideR.drawable.lucide_ic_play, "Tocar", Modifier.size(20.dp), c.accent)
+        if (onQueue != null || onPlaylist != null || onShare != null) {
+            Box {
+                IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(37.dp)) {
+                    LIcon(LucideR.drawable.lucide_ic_ellipsis, "Mais opções", Modifier.size(19.dp), c.muted)
+                }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    if (onQueue != null) DropdownMenuItem(text = { Text("Adicionar à fila") },
+                        onClick = { menuExpanded = false; onQueue() })
+                    if (onPlaylist != null) DropdownMenuItem(text = { Text("Adicionar à playlist") },
+                        onClick = { menuExpanded = false; onPlaylist() })
+                    if (onShare != null) DropdownMenuItem(text = { Text("Compartilhar música") },
+                        onClick = { menuExpanded = false; onShare() })
+                }
+            }
+        } else LIcon(LucideR.drawable.lucide_ic_play, "Tocar", Modifier.size(20.dp), c.accent)
         Spacer(Modifier.width(4.dp))
     }
 }
@@ -892,6 +1238,7 @@ private fun MiniPlayer(song: Song, playback: PlaybackConnector, onExpand: () -> 
 private fun NativePlayerScreen(
     playback: PlaybackConnector, isFavorite: Boolean, onFavorite: () -> Unit,
     onClose: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit,
+    onQueue: () -> Unit, onRepeat: () -> Unit, onShare: () -> Unit,
 ) {
     val song = playback.currentSong ?: return
     val c = ocarinaColors
@@ -909,13 +1256,17 @@ private fun NativePlayerScreen(
                     OcarinaMark(Modifier.size(19.dp), c.text)
                 }
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = onClose) { LIcon(LucideR.drawable.lucide_ic_ellipsis, "Minimizar", Modifier.size(22.dp)) }
+                IconButton(onClick = onShare) { LIcon(LucideR.drawable.lucide_ic_share_2, "Compartilhar música", Modifier.size(22.dp)) }
             }
             Spacer(Modifier.weight(0.5f))
             BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 val coverSize = minOf(maxWidth, 365.dp)
-                AlbumArtwork(song, "Capa de ${song.title}", highQuality = true,
+                if (song.artwork.isNotBlank()) AlbumArtwork(song, "Capa de ${song.title}", highQuality = true,
                     modifier = Modifier.size(coverSize).clip(RoundedCornerShape(23.dp)).background(c.artworkSurface))
+                else Box(Modifier.size(coverSize).clip(RoundedCornerShape(23.dp)).background(c.artworkSurface),
+                    contentAlignment = Alignment.Center) {
+                    LIcon(LucideR.drawable.lucide_ic_music_2, "Áudio local", Modifier.size(86.dp), c.accent)
+                }
             }
             Spacer(Modifier.weight(0.65f))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -926,7 +1277,7 @@ private fun NativePlayerScreen(
                     Text(song.artist, color = c.muted, fontSize = 15.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                IconButton(onClick = onFavorite) {
+                IconButton(onClick = onFavorite, enabled = !song.videoId.startsWith("local:")) {
                     LIcon(LucideR.drawable.lucide_ic_heart, "Curtir música", Modifier.size(27.dp),
                         if (isFavorite) c.accent else c.text)
                 }
@@ -972,10 +1323,17 @@ private fun NativePlayerScreen(
             }
             Spacer(Modifier.weight(0.35f))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                LIcon(LucideR.drawable.lucide_ic_audio_lines, null, Modifier.size(21.dp), c.muted)
-                Text(if (playback.sourceBitrateKbps > 0) "Fonte: ~${playback.sourceBitrateKbps} kbps"
-                    else "Áudio original da fonte", color = c.muted, fontSize = 11.sp)
-                LIcon(LucideR.drawable.lucide_ic_list_music, null, Modifier.size(21.dp), c.muted)
+                IconButton(onClick = onRepeat) {
+                    LIcon(if (playback.repeatMode == 1) LucideR.drawable.lucide_ic_repeat_1
+                        else LucideR.drawable.lucide_ic_repeat,
+                        "Repetição: ${when(playback.repeatMode) { 1 -> "faixa"; 2 -> "lista"; else -> "desligada" }}",
+                        Modifier.size(23.dp), if (playback.repeatMode > 0) c.accent else c.muted)
+                }
+                Text(if (playback.sourceBitrateKbps > 0) "~${playback.sourceBitrateKbps} kbps"
+                    else "Áudio original", color = c.muted, fontSize = 11.sp)
+                IconButton(onClick = onQueue) {
+                    LIcon(LucideR.drawable.lucide_ic_list_music, "Abrir fila de escuta", Modifier.size(23.dp), c.accent)
+                }
             }
         }
     }

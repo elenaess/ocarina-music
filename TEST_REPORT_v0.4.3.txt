@@ -1,0 +1,19 @@
+Ocarina v0.4.3 — Verificações no ambiente de desenvolvimento
+
+PASSOU:
+- tools/verify_release.py (10 grupos de verificações estáticas)
+- AndroidManifest.xml analisado como XML válido
+- .github/workflows/android.yml analisado como YAML válido
+- Kotlin 1.9 executado sobre os 15 arquivos Kotlin; não foram encontradas mensagens de erro de SINTAXE ("expecting", "Unexpected tokens" etc.). O compilador produziu referências não resolvidas, pois não há as bibliotecas Android/Compose aqui.
+- Revisão: sem mudanças em OcarinaTheme.kt, login Firebase e projeto/application ID preservados.
+
+NÃO FOI POSSÍVEL EXECUTAR:
+- Gradle :app:assembleDebug (Android SDK/Gradle e dependências ausentes neste ambiente; sem rede no container)
+- Testes de interface em aparelho Android real
+- Testes de resposta do catálogo remoto de artistas e álbuns
+- Teste de sincronização do Firebase em execução
+- Validação da assinatura SHA-1 do APK final
+
+O GitHub conectado permite leitura, mas a tentativa de criar um branch de teste retornou HTTP 403. O último build verificado no repositório é o da v0.4.2; o ZIP v0.4.3 ainda precisa de um build.
+
+A v0.4.3 deve ser tratada como versão de TESTE, não como APK validado em produção.

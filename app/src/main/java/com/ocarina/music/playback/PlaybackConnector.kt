@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -17,6 +18,8 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.ocarina.music.data.Song
+import com.ocarina.music.data.OcarinaOfflineStore
+import com.ocarina.music.data.OcarinaSettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -36,6 +39,18 @@ class PlaybackConnector(context: Context) {
     private var resolving: Job? = null
     private var retryingSource = false
     private var playSerial = 0L
+    private var endedForSerial = -1L
+    var onTrackEnded: ((Song) -> Unit)? = null
+    private val offline = OcarinaOfflineStore(appContext)
+    private val settings = OcarinaSettings(appContext)
+    var repeatMode by mutableIntStateOf(settings.repeatMode())
+        private set
+
+    fun cycleRepeat() {
+        repeatMode = (repeatMode + 1) % 3
+        settings.setRepeatMode(repeatMode)
+        controller?.repeatMode = if (repeatMode == 1) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+    }
 
     var currentSong by mutableStateOf<Song?>(null)
         private set
@@ -58,7 +73,16 @@ class PlaybackConnector(context: Context) {
     private val future = MediaController.Builder(appContext, token).buildAsync()
     private var controller: MediaController? = null
     private val listener = object : Player.Listener {
-        override fun onEvents(player: Player, events: Player.Events) { sync(player) }
+        override fun onEvents(player: Player, events: Player.Events) {
+            sync(player)
+            if (player.playbackState == Player.STATE_ENDED && repeatMode != 1 &&
+                controller?.currentMediaItem?.mediaId == currentSong?.videoId &&
+                endedForSerial != playSerial) {
+                endedForSerial = playSerial
+                val endedSong = currentSong
+                if (endedSong != null) scope.launch { onTrackEnded?.invoke(endedSong) }
+            }
+        }
         override fun onPlayerError(error: PlaybackException) {
             Log.e("OcarinaPlayback", "Falha Media3 na faixa ${currentSong?.videoId}", error)
             if (resolvingAudio || controller?.currentMediaItem?.mediaId != currentSong?.videoId) return
@@ -84,6 +108,7 @@ class PlaybackConnector(context: Context) {
                 val ready = future.get()
                 controller = ready
                 ready.addListener(listener)
+                ready.repeatMode = if (repeatMode == 1) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
                 sync(ready)
                 connected.complete(ready)
             } catch (e: Exception) {
@@ -118,7 +143,8 @@ class PlaybackConnector(context: Context) {
                 item.mediaId,
                 md.title?.toString() ?: "Música",
                 md.artist?.toString() ?: "Artista",
-                md.artworkUri?.toString() ?: ""
+                md.artworkUri?.toString() ?: "",
+                currentSong?.album.orEmpty()
             )
         }
     }
@@ -132,6 +158,7 @@ class PlaybackConnector(context: Context) {
         }
         resolving?.cancel()
         val thisRequest = ++playSerial
+        endedForSerial = -1L
         if (!isRetry) retryingSource = false
         resolvingAudio = true
         // Only pause the previous track: stop()/clearMediaItems() cause extra MediaSession
@@ -143,7 +170,11 @@ class PlaybackConnector(context: Context) {
         error = null
         resolving = scope.launch {
             try {
-                val source = AudioSourceResolver.resolve(song.videoId, refresh = refresh)
+                val localUri = if (song.videoId.startsWith("local:")) offline.uriFor(song.videoId) else null
+                val source = if (song.videoId.startsWith("local:")) {
+                    if (localUri == null) throw java.io.IOException("Arquivo local não encontrado.")
+                    ResolvedAudio(localUri.toString(), 0)
+                } else AudioSourceResolver.resolve(song.videoId, refresh = refresh)
                 val c = connected.await()
                 if (thisRequest != playSerial) return@launch
                 sourceBitrateKbps = source.bitrateKbps.toLong()
@@ -153,7 +184,7 @@ class PlaybackConnector(context: Context) {
                     .setMediaMetadata(MediaMetadata.Builder()
                         .setTitle(song.title)
                         .setArtist(song.artist)
-                        .setArtworkUri(Uri.parse(song.artwork))
+                        .setArtworkUri(song.artwork.takeIf { it.startsWith("https://") }?.let(Uri::parse))
                         .build())
                     .build()
                 c.setMediaItem(item)
@@ -194,6 +225,7 @@ class PlaybackConnector(context: Context) {
     fun clearError() { error = null }
     fun close() {
         resolving?.cancel()
+        onTrackEnded = null
         controller?.removeListener(listener)
         MediaController.releaseFuture(future)
         scope.cancel()

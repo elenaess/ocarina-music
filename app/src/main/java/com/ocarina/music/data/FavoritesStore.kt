@@ -21,6 +21,7 @@ class FavoritesStore(context: Context) {
                 item.optString("title", "Faixa"),
                 item.optString("artist", "Artista"),
                 item.optString("artwork"),
+                item.optString("album"),
             )
         }
     } catch (_: Exception) { emptyList() }
@@ -33,6 +34,7 @@ class FavoritesStore(context: Context) {
                 put("title", song.title)
                 put("artist", song.artist)
                 put("artwork", song.artwork)
+                put("album", song.album)
             })
         }
         prefs.edit().putString(key(uid), array.toString()).apply()

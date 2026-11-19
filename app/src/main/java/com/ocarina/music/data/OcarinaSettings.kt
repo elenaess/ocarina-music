@@ -9,13 +9,15 @@ class OcarinaSettings(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences("ocarina_preferences", Context.MODE_PRIVATE)
     fun isDark(): Boolean = preferences.getBoolean("dark_theme", false)
     fun setDark(value: Boolean) { preferences.edit().putBoolean("dark_theme", value).apply() }
+    fun repeatMode(): Int = preferences.getInt("repeat_mode", 0).coerceIn(0, 2)
+    fun setRepeatMode(value: Int) { preferences.edit().putInt("repeat_mode", value.coerceIn(0, 2)).apply() }
     fun recentlyPlayed(): List<Song> = try {
         val items = JSONArray(preferences.getString("recent_played", "[]") ?: "[]")
         (0 until items.length()).mapNotNull { index ->
             val item = items.optJSONObject(index) ?: return@mapNotNull null
             val videoId = item.optString("id")
             if (videoId.isBlank()) return@mapNotNull null
-            Song(videoId, item.optString("title"), item.optString("artist"), item.optString("artwork"))
+            Song(videoId, item.optString("title"), item.optString("artist"), item.optString("artwork"), item.optString("album"))
         }
     } catch (_: Exception) { emptyList() }
 
@@ -28,6 +30,7 @@ class OcarinaSettings(context: Context) {
                 put("title", item.title)
                 put("artist", item.artist)
                 put("artwork", item.artwork)
+                put("album", item.album)
             })
         }
         preferences.edit().putString("recent_played", array.toString()).apply()

@@ -12,6 +12,6 @@ git clone --branch main --single-branch "$REPO" "$WORKDIR/ocarina-music"
 cd "$WORKDIR/ocarina-music"
 git add -A
 if git diff --cached --quiet; then echo 'Sem mudanças novas.'; exit 0; fi
-git -c user.name='elenaess' -c user.email='289515223+elenaess@users.noreply.github.com' commit -m 'perf: compact navbar and selected-track playback (v0.3.3)'
+git -c user.name='elenaess' -c user.email='289515223+elenaess@users.noreply.github.com' commit -m 'feat: playlists, artistas, albuns, offline e repeat (v0.4.3)'
 git push origin main
 echo 'Pronto: https://github.com/elenaess/ocarina-music/actions'
