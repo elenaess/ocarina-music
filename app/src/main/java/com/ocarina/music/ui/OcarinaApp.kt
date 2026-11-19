@@ -3,6 +3,7 @@ package com.ocarina.music.ui
 import android.app.Activity
 import android.graphics.BitmapFactory
 import android.util.Base64
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -118,6 +119,14 @@ fun OcarinaApp() {
         var queue by remember { mutableStateOf<List<Song>>(emptyList()) }
         var switchingTabs by remember { mutableStateOf(false) }
         var syncedAccount by remember { mutableStateOf<String?>(null) }
+        BackHandler(enabled = showFullPlayer || showInfo || screen != Screen.HOME) {
+            when {
+                showInfo -> showInfo = false
+                showFullPlayer -> showFullPlayer = false
+                screen == Screen.PROFILE -> screen = previousScreen
+                else -> screen = Screen.HOME
+            }
+        }
         // Keep guest favourites local; cloud favourites are scoped to each signed-in user.
         LaunchedEffect(account.user?.uid) {
             syncedAccount = null
@@ -199,6 +208,7 @@ fun OcarinaApp() {
         }
 
         Box(Modifier.fillMaxSize()) {
+        if (!showFullPlayer || playback.currentSong == null) {
         Scaffold(
             containerColor = c.background,
             topBar = {
@@ -254,20 +264,16 @@ fun OcarinaApp() {
                         onInfo = { showInfo = true }, onLiked = { screen = Screen.LIKED },
                     )
                 }
+                if (switchingTabs) Box(Modifier.matchParentSize().background(c.accent.copy(alpha = 0.035f)))
                 AnimatedVisibility(
-                    visible = switchingTabs,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                    enter = fadeIn(tween(25)), exit = fadeOut(tween(45)),
+                    visible = switchingTabs, modifier = Modifier.align(Alignment.Center),
+                    enter = fadeIn(tween(20)), exit = fadeOut(tween(20)),
                 ) { ThreeDots() }
             }
         }
 
-        AnimatedVisibility(
-            visible = showFullPlayer && playback.currentSong != null,
-            enter = fadeIn(tween(90)),
-            exit = fadeOut(tween(90)),
-            modifier = Modifier.fillMaxSize().zIndex(1f),
-        ) {
+        } // Descarta as listas pesadas enquanto o player está aberto.
+        if (showFullPlayer && playback.currentSong != null) {
             NativePlayerScreen(
                 playback = playback,
                 isFavorite = favorites.any { it.videoId == playback.currentSong?.videoId },
@@ -280,7 +286,7 @@ fun OcarinaApp() {
             AlertDialog(
                 onDismissRequest = { showInfo = false },
                 title = { Text("Ocarina") },
-                text = { Text("Versão 0.4.1. Contas Google e e-mail pelo Firebase, foto e favoritos no Firestore. Psiu ainda não está integrado. Reprodução experimental via fontes externas.") },
+                text = { Text("Versão 0.4.2. Contas Google e e-mail pelo Firebase, foto e favoritos no Firestore. Psiu ainda não está integrado. Reprodução experimental via fontes externas.") },
                 confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Entendi") } },
             )
         }
@@ -335,8 +341,8 @@ private fun ThreeDots() {
         repeat(3) { step -> active = step; delay(30) }
     }
     Row(
-        modifier = Modifier.padding(top = 8.dp).clip(RoundedCornerShape(12.dp))
-            .background(c.surface).padding(horizontal = 13.dp, vertical = 6.dp),
+        modifier = Modifier.clip(RoundedCornerShape(16.dp))
+            .background(c.surface).padding(horizontal = 18.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

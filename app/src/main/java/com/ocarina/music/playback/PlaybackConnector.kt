@@ -34,7 +34,6 @@ class PlaybackConnector(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val connected = CompletableDeferred<MediaController>()
     private var resolving: Job? = null
-    private var prefetchJob: Job? = null
     private var retryingSource = false
     private var playSerial = 0L
 
@@ -62,6 +61,7 @@ class PlaybackConnector(context: Context) {
         override fun onEvents(player: Player, events: Player.Events) { sync(player) }
         override fun onPlayerError(error: PlaybackException) {
             Log.e("OcarinaPlayback", "Falha Media3 na faixa ${currentSong?.videoId}", error)
+            if (resolvingAudio || controller?.currentMediaItem?.mediaId != currentSong?.videoId) return
             // Expiring temporary URLs occasionally return 403. Retry the current track once.
             if (!retryingSource && currentSong != null &&
                 controller?.currentMediaItem?.mediaId == currentSong?.videoId &&
@@ -103,9 +103,14 @@ class PlaybackConnector(context: Context) {
     }
 
     private fun sync(player: Player) {
+        val item = player.currentMediaItem
+        if (item?.mediaId != currentSong?.videoId) {
+            playing = false
+            buffering = resolvingAudio
+            return
+        }
         playing = player.isPlaying
         buffering = player.playbackState == Player.STATE_BUFFERING
-        val item = player.currentMediaItem
         // Do not let events from the OLD media item overwrite a freshly selected search result.
         if (item != null && !resolvingAudio && item.mediaId == currentSong?.videoId) {
             val md = item.mediaMetadata
@@ -126,13 +131,13 @@ class PlaybackConnector(context: Context) {
             return
         }
         resolving?.cancel()
-        prefetchJob?.cancel()
         val thisRequest = ++playSerial
         if (!isRetry) retryingSource = false
         resolvingAudio = true
         // Only pause the previous track: stop()/clearMediaItems() cause extra MediaSession
         // transitions and can synchronously restore stale metadata into Compose.
         controller?.pause()
+        controller?.clearMediaItems()
         currentSong = song
         sourceBitrateKbps = 0L
         error = null
@@ -145,7 +150,6 @@ class PlaybackConnector(context: Context) {
                 val item = MediaItem.Builder()
                     .setMediaId(song.videoId)
                     .setUri(source.url)
-                    .setCustomCacheKey("ocarina-${song.videoId}-${source.bitrateKbps}")
                     .setMediaMetadata(MediaMetadata.Builder()
                         .setTitle(song.title)
                         .setArtist(song.artist)
@@ -155,18 +159,7 @@ class PlaybackConnector(context: Context) {
                 c.setMediaItem(item)
                 c.prepare()
                 c.play()
-                // Refresh signed URLs shortly before they are needed, not three minutes early.
-                // Avoid competing with initial playback; URL cache expires after 90 seconds.
-                if (next != null && next.videoId != song.videoId) {
-                    prefetchJob = scope.launch {
-                        while (isActive) {
-                            val remaining = durationMs - positionMs
-                            if (durationMs > 0 && remaining in 1..25_000L) break
-                            delay(1_000)
-                        }
-                        if (isActive) runCatching { AudioSourceResolver.resolve(next.videoId) }
-                    }
-                }
+                // Pré-extração desativada até estabilizar o player.
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -175,7 +168,7 @@ class PlaybackConnector(context: Context) {
                 error = "Não foi possível carregar '${song.title}'. ${e.message ?: "Fonte temporariamente indisponível."}"
                 buffering = false
             } finally {
-                resolvingAudio = false
+                if (thisRequest == playSerial) resolvingAudio = false
             }
         }
     }
@@ -201,7 +194,6 @@ class PlaybackConnector(context: Context) {
     fun clearError() { error = null }
     fun close() {
         resolving?.cancel()
-        prefetchJob?.cancel()
         controller?.removeListener(listener)
         MediaController.releaseFuture(future)
         scope.cancel()

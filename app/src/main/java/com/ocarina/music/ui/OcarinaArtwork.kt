@@ -42,7 +42,7 @@ fun AlbumArtwork(
         preferredArtwork(song.artwork, song.videoId, highQuality)
     }
     var imageUrl by remember(first, song.artwork) { mutableStateOf(first) }
-    val pixelLimit = if (highQuality) 720 else if (small) 144 else 360
+    val pixelLimit = if (highQuality) 640 else if (small) 112 else 260
     val request = remember(imageUrl, pixelLimit) {
         ImageRequest.Builder(context)
             .data(imageUrl)
