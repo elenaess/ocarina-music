@@ -39,6 +39,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowInsetsControllerCompat
 import coil.compose.AsyncImage
 import com.ocarina.music.R
+import com.composables.icons.lucide.R as LucideR
 import com.ocarina.music.data.FavoritesStore
 import com.ocarina.music.data.OcarinaSettings
 import com.ocarina.music.data.Song
@@ -166,10 +167,10 @@ fun OcarinaApp() {
                     }
                     NavigationBar(containerColor = c.background, tonalElevation = 0.dp, modifier = Modifier.height(76.dp)) {
                         listOf(
-                            Triple(Screen.HOME, "Início", R.drawable.lucide_ic_house),
-                            Triple(Screen.SEARCH, "Buscar", R.drawable.lucide_ic_search),
-                            Triple(Screen.LIBRARY, "Biblioteca", R.drawable.lucide_ic_library),
-                            Triple(Screen.LIKED, "Curtidas", R.drawable.lucide_ic_heart),
+                            Triple(Screen.HOME, "Início", LucideR.drawable.lucide_ic_house),
+                            Triple(Screen.SEARCH, "Buscar", LucideR.drawable.lucide_ic_search),
+                            Triple(Screen.LIBRARY, "Biblioteca", LucideR.drawable.lucide_ic_library),
+                            Triple(Screen.LIKED, "Curtidas", LucideR.drawable.lucide_ic_heart),
                         ).forEach { (tab, label, icon) ->
                             val active = screen == tab
                             NavigationBarItem(
@@ -258,7 +259,7 @@ private fun AppHeader(screen: Screen, onProfile: () -> Unit, onBack: () -> Unit,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (screen == Screen.PROFILE) {
-            IconButton(onClick = onBack) { LIcon(R.drawable.lucide_ic_arrow_left, "Voltar", Modifier.size(23.dp)) }
+            IconButton(onClick = onBack) { LIcon(LucideR.drawable.lucide_ic_arrow_left, "Voltar", Modifier.size(23.dp)) }
         } else {
             OcarinaMark(Modifier.size(48.dp))
         }
@@ -267,12 +268,12 @@ private fun AppHeader(screen: Screen, onProfile: () -> Unit, onBack: () -> Unit,
             fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp)
         Spacer(Modifier.weight(1f))
         if (screen != Screen.SEARCH && screen != Screen.PROFILE) {
-            IconButton(onClick = onSearch) { LIcon(R.drawable.lucide_ic_search, "Buscar", Modifier.size(22.dp)) }
+            IconButton(onClick = onSearch) { LIcon(LucideR.drawable.lucide_ic_search, "Buscar", Modifier.size(22.dp)) }
         }
         if (screen != Screen.PROFILE) {
             IconButton(onClick = onProfile) {
                 Box(Modifier.size(37.dp).clip(CircleShape).background(c.elevated), contentAlignment = Alignment.Center) {
-                    LIcon(R.drawable.lucide_ic_user_round, "Abrir perfil", Modifier.size(19.dp))
+                    LIcon(LucideR.drawable.lucide_ic_user_round, "Abrir perfil", Modifier.size(19.dp))
                 }
             }
         }
@@ -330,7 +331,7 @@ private fun HomePage(
                     }
                 } else {
                     EmptyPanel("Seu histórico começa aqui", "Escolha uma música para encontrar suas últimas faixas neste espaço.",
-                        R.drawable.lucide_ic_headphones, onSearch, "Encontrar músicas")
+                        LucideR.drawable.lucide_ic_headphones, onSearch, "Encontrar músicas")
                 }
             }
         }
@@ -343,7 +344,7 @@ private fun HomePage(
                 if (loading) LoadingRow()
                 else if (error != null) ErrorPanel(error, onRetry)
                 else if (songs.isEmpty()) EmptyPanel("Sem sugestões no momento", "Experimente pesquisar uma música.",
-                    R.drawable.lucide_ic_search, onSearch, "Buscar")
+                    LucideR.drawable.lucide_ic_search, onSearch, "Buscar")
                 else LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(songs.take(10), key = { it.videoId }) { song ->
                         ArtworkCard(song, onClick = { onPlay(song, songs) }, wide = true)
@@ -370,7 +371,7 @@ private fun SectionHeader(title: String, onClick: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(title, color = c.text, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         if (onClick != null) IconButton(onClick = onClick, modifier = Modifier.size(34.dp)) {
-            LIcon(R.drawable.lucide_ic_chevron_right, "Ver mais", Modifier.size(20.dp))
+            LIcon(LucideR.drawable.lucide_ic_chevron_right, "Ver mais", Modifier.size(20.dp))
         }
     }
 }
@@ -385,7 +386,7 @@ private fun ArtworkCard(song: Song, onClick: () -> Unit, wide: Boolean = false) 
                 contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).size(36.dp)
                 .clip(CircleShape).background(c.surface), contentAlignment = Alignment.Center) {
-                LIcon(R.drawable.lucide_ic_play, "Tocar ${song.title}", Modifier.size(19.dp))
+                LIcon(LucideR.drawable.lucide_ic_play, "Tocar ${song.title}", Modifier.size(19.dp))
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -413,9 +414,9 @@ private fun SearchPage(
             OutlinedTextField(
                 value = text, onValueChange = onText, modifier = Modifier.fillMaxWidth(),
                 placeholder = { Text("Músicas, artistas e álbuns", color = c.muted) },
-                leadingIcon = { LIcon(R.drawable.lucide_ic_search, null, Modifier.size(21.dp), c.accent) },
+                leadingIcon = { LIcon(LucideR.drawable.lucide_ic_search, null, Modifier.size(21.dp), c.accent) },
                 trailingIcon = { if (text.isNotEmpty()) IconButton(onClick = { onText("") }) {
-                    LIcon(R.drawable.lucide_ic_x, "Limpar busca", Modifier.size(19.dp))
+                    LIcon(LucideR.drawable.lucide_ic_x, "Limpar busca", Modifier.size(19.dp))
                 } },
                 singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 shape = RoundedCornerShape(17.dp),
@@ -428,10 +429,10 @@ private fun SearchPage(
             Text(if (text.isBlank()) "Explore por aqui" else "Resultados", color = c.text,
                 fontSize = 19.sp, fontWeight = FontWeight.Bold)
         }
-        if (text.isBlank()) item { EmptyPanel("Uma nova descoberta começa na busca", "Pesquise sua próxima música favorita.", R.drawable.lucide_ic_search) }
+        if (text.isBlank()) item { EmptyPanel("Uma nova descoberta começa na busca", "Pesquise sua próxima música favorita.", LucideR.drawable.lucide_ic_search) }
         else if (loading) item { LoadingRow() }
         else if (error != null) item { ErrorPanel(error, onRetry) }
-        else if (songs.isEmpty()) item { EmptyPanel("Não encontramos resultados", "Tente outra música ou artista.", R.drawable.lucide_ic_music_2) }
+        else if (songs.isEmpty()) item { EmptyPanel("Não encontramos resultados", "Tente outra música ou artista.", LucideR.drawable.lucide_ic_music_2) }
         else items(songs, key = { it.videoId }) { song ->
             SongRow(song, favorites.any { it.videoId == song.videoId },
                 onOpen = { onPlay(song) }, onFavorite = { onFavorite(song) })
@@ -453,11 +454,11 @@ private fun LibraryPage(
         item {
             Text("Sua Biblioteca", fontSize = 31.sp, fontWeight = FontWeight.Bold, color = c.text)
             Spacer(Modifier.height(17.dp))
-            LibraryEntry(R.drawable.lucide_ic_heart, "Músicas Curtidas", "${favorites.size} músicas", onLiked)
-            LibraryEntry(R.drawable.lucide_ic_download, "Downloads", "Em desenvolvimento", onInfo)
-            LibraryEntry(R.drawable.lucide_ic_list_music, "Playlists", "Em desenvolvimento", onInfo)
-            LibraryEntry(R.drawable.lucide_ic_disc_3, "Álbuns", "Em desenvolvimento", onInfo)
-            LibraryEntry(R.drawable.lucide_ic_user_round, "Artistas", "Em desenvolvimento", onInfo)
+            LibraryEntry(LucideR.drawable.lucide_ic_heart, "Músicas Curtidas", "${favorites.size} músicas", onLiked)
+            LibraryEntry(LucideR.drawable.lucide_ic_download, "Downloads", "Em desenvolvimento", onInfo)
+            LibraryEntry(LucideR.drawable.lucide_ic_list_music, "Playlists", "Em desenvolvimento", onInfo)
+            LibraryEntry(LucideR.drawable.lucide_ic_disc_3, "Álbuns", "Em desenvolvimento", onInfo)
+            LibraryEntry(LucideR.drawable.lucide_ic_user_round, "Artistas", "Em desenvolvimento", onInfo)
         }
         item {
             Spacer(Modifier.height(9.dp))
@@ -465,7 +466,7 @@ private fun LibraryPage(
         }
         if (recent.isEmpty()) item {
             EmptyPanel("Nenhuma música recente", "Quando você ouvir uma faixa, ela aparecerá aqui.",
-                R.drawable.lucide_ic_music_2, onSearch, "Explorar músicas")
+                LucideR.drawable.lucide_ic_music_2, onSearch, "Explorar músicas")
         } else items(recent, key = { it.videoId }) { song ->
             SongRow(song, favorites.any { it.videoId == song.videoId },
                 onOpen = { onPlay(song) }, onFavorite = { onFavorite(song) })
@@ -488,7 +489,7 @@ private fun LibraryEntry(@DrawableRes icon: Int, title: String, subtitle: String
             Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = c.text)
             Text(subtitle, fontSize = 12.sp, color = c.muted)
         }
-        LIcon(R.drawable.lucide_ic_chevron_right, "Abrir", Modifier.size(19.dp), c.muted)
+        LIcon(LucideR.drawable.lucide_ic_chevron_right, "Abrir", Modifier.size(19.dp), c.muted)
     }
 }
 
@@ -505,7 +506,7 @@ private fun LikedPage(favorites: List<Song>, onPlay: (Song) -> Unit, onFavorite:
                     .background(Brush.linearGradient(listOf(c.softAccent, c.artworkSurface))),
                 contentAlignment = Alignment.Center,
             ) {
-                LIcon(R.drawable.lucide_ic_heart, null, Modifier.size(67.dp), c.accent)
+                LIcon(LucideR.drawable.lucide_ic_heart, null, Modifier.size(67.dp), c.accent)
             }
             Spacer(Modifier.height(17.dp))
             Text("Músicas Curtidas", color = c.text, fontSize = 30.sp, fontWeight = FontWeight.Bold)
@@ -515,11 +516,11 @@ private fun LikedPage(favorites: List<Song>, onPlay: (Song) -> Unit, onFavorite:
                 onClick = { onPlay(favorites.first()) },
                 modifier = Modifier.size(54.dp),
                 colors = IconButtonDefaults.filledIconButtonColors(containerColor = c.accent, contentColor = c.onAccent),
-            ) { LIcon(R.drawable.lucide_ic_play, "Tocar todas", Modifier.size(23.dp), c.onAccent) }
+            ) { LIcon(LucideR.drawable.lucide_ic_play, "Tocar todas", Modifier.size(23.dp), c.onAccent) }
         }
         if (favorites.isEmpty()) item {
             EmptyPanel("Suas favoritas vão morar aqui", "Toque no coração de uma música para salvá-la.",
-                R.drawable.lucide_ic_heart, onExplore, "Encontrar músicas")
+                LucideR.drawable.lucide_ic_heart, onExplore, "Encontrar músicas")
         }
         else items(favorites, key = { it.videoId }) { song ->
             SongRow(song, true, onOpen = { onPlay(song) }, onFavorite = { onFavorite(song) })
@@ -531,7 +532,7 @@ private fun LikedPage(favorites: List<Song>, onPlay: (Song) -> Unit, onFavorite:
 private fun ProfilePage(isDark: Boolean, favorites: Int, recent: Int, onTheme: (Boolean) -> Unit, onInfo: () -> Unit, onLiked: () -> Unit) {
     val c = ocarinaColors
     LazyColumn(
-        Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 21.dp, vertical = 14.dp, bottom = 32.dp),
+        Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 21.dp, end = 21.dp, top = 14.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item {
@@ -544,7 +545,7 @@ private fun ProfilePage(isDark: Boolean, favorites: Int, recent: Int, onTheme: (
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(Modifier.size(95.dp).clip(CircleShape).background(c.softAccent),
                             contentAlignment = Alignment.Center) {
-                            LIcon(R.drawable.lucide_ic_user_round, "Avatar", Modifier.size(48.dp), c.accent)
+                            LIcon(LucideR.drawable.lucide_ic_user_round, "Avatar", Modifier.size(48.dp), c.accent)
                         }
                         Spacer(Modifier.height(15.dp))
                         Text("Seu espaço", fontSize = 26.sp, color = c.text, fontWeight = FontWeight.Bold)
@@ -566,13 +567,13 @@ private fun ProfilePage(isDark: Boolean, favorites: Int, recent: Int, onTheme: (
                     shape = RoundedCornerShape(17.dp), color = c.softAccent,
                 ) {
                     Row(Modifier.padding(17.dp), verticalAlignment = Alignment.CenterVertically) {
-                        LIcon(R.drawable.lucide_ic_log_in, null, Modifier.size(22.dp), c.accent)
+                        LIcon(LucideR.drawable.lucide_ic_log_in, null, Modifier.size(22.dp), c.accent)
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text("Entrar ou criar conta", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = c.text)
                             Text("Firebase será conectado na próxima etapa", fontSize = 11.sp, color = c.muted)
                         }
-                        LIcon(R.drawable.lucide_ic_chevron_right, null, Modifier.size(18.dp), c.accent)
+                        LIcon(LucideR.drawable.lucide_ic_chevron_right, null, Modifier.size(18.dp), c.accent)
                     }
                 }
             }
@@ -583,7 +584,7 @@ private fun ProfilePage(isDark: Boolean, favorites: Int, recent: Int, onTheme: (
                 Spacer(Modifier.height(7.dp))
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface).padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    LIcon(if (isDark) R.drawable.lucide_ic_moon else R.drawable.lucide_ic_sun,
+                    LIcon(if (isDark) LucideR.drawable.lucide_ic_moon else LucideR.drawable.lucide_ic_sun,
                         null, Modifier.size(24.dp), c.accent)
                     Spacer(Modifier.width(13.dp))
                     Column(Modifier.weight(1f)) {
@@ -595,10 +596,10 @@ private fun ProfilePage(isDark: Boolean, favorites: Int, recent: Int, onTheme: (
                 Spacer(Modifier.height(10.dp))
                 Surface(onClick = onLiked, shape = RoundedCornerShape(18.dp), color = c.surface) {
                     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        LIcon(R.drawable.lucide_ic_heart, null, Modifier.size(23.dp), c.accent)
+                        LIcon(LucideR.drawable.lucide_ic_heart, null, Modifier.size(23.dp), c.accent)
                         Spacer(Modifier.width(13.dp))
                         Text("Minhas curtidas", modifier = Modifier.weight(1f), color = c.text, fontSize = 15.sp)
-                        LIcon(R.drawable.lucide_ic_chevron_right, null, Modifier.size(19.dp), c.muted)
+                        LIcon(LucideR.drawable.lucide_ic_chevron_right, null, Modifier.size(19.dp), c.muted)
                     }
                 }
             }
@@ -609,7 +610,7 @@ private fun ProfilePage(isDark: Boolean, favorites: Int, recent: Int, onTheme: (
                 Spacer(Modifier.height(7.dp))
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface).padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    LIcon(R.drawable.lucide_ic_cloud, null, Modifier.size(22.dp), c.accent)
+                    LIcon(LucideR.drawable.lucide_ic_cloud, null, Modifier.size(22.dp), c.accent)
                     Spacer(Modifier.width(13.dp))
                     Column {
                         Text("Integração com Psiu", fontWeight = FontWeight.SemiBold, color = c.text)
@@ -649,11 +650,11 @@ private fun SongRow(song: Song, isFavorite: Boolean, onOpen: () -> Unit, onFavor
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         IconButton(onClick = onFavorite, modifier = Modifier.size(41.dp)) {
-            LIcon(R.drawable.lucide_ic_heart,
+            LIcon(LucideR.drawable.lucide_ic_heart,
                 if (isFavorite) "Remover dos favoritos" else "Adicionar aos favoritos",
                 Modifier.size(20.dp), if (isFavorite) c.accent else c.muted)
         }
-        LIcon(R.drawable.lucide_ic_play, "Tocar", Modifier.size(20.dp), c.accent)
+        LIcon(LucideR.drawable.lucide_ic_play, "Tocar", Modifier.size(20.dp), c.accent)
         Spacer(Modifier.width(4.dp))
     }
 }
@@ -685,7 +686,7 @@ private fun ErrorPanel(message: String, onRetry: () -> Unit) {
         Spacer(Modifier.height(5.dp))
         Text(message, color = c.muted, fontSize = 12.sp)
         TextButton(onClick = onRetry) {
-            LIcon(R.drawable.lucide_ic_refresh_cw, null, Modifier.size(16.dp), c.accent)
+            LIcon(LucideR.drawable.lucide_ic_refresh_cw, null, Modifier.size(16.dp), c.accent)
             Spacer(Modifier.width(8.dp))
             Text("Tentar novamente", color = c.accent)
         }
@@ -721,7 +722,7 @@ private fun MiniPlayer(song: Song, playback: PlaybackConnector, onExpand: () -> 
             IconButton(onClick = { playback.toggle() }, enabled = !playback.resolvingAudio) {
                 if (playback.resolvingAudio || playback.buffering) {
                     CircularProgressIndicator(Modifier.size(19.dp), color = c.accent, strokeWidth = 2.dp)
-                } else LIcon(if (playback.playing) R.drawable.lucide_ic_pause else R.drawable.lucide_ic_play,
+                } else LIcon(if (playback.playing) LucideR.drawable.lucide_ic_pause else LucideR.drawable.lucide_ic_play,
                     "Tocar ou pausar", Modifier.size(23.dp))
             }
         }
@@ -751,14 +752,14 @@ private fun NativePlayerScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onClose) { LIcon(R.drawable.lucide_ic_chevron_down, "Minimizar", Modifier.size(28.dp)) }
+                IconButton(onClick = onClose) { LIcon(LucideR.drawable.lucide_ic_chevron_down, "Minimizar", Modifier.size(28.dp)) }
                 Spacer(Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("TOCANDO AGORA", color = c.muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     Text("Ocarina", color = c.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = onClose) { LIcon(R.drawable.lucide_ic_ellipsis, "Minimizar", Modifier.size(22.dp)) }
+                IconButton(onClick = onClose) { LIcon(LucideR.drawable.lucide_ic_ellipsis, "Minimizar", Modifier.size(22.dp)) }
             }
             Spacer(Modifier.weight(0.5f))
             BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -778,7 +779,7 @@ private fun NativePlayerScreen(
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 IconButton(onClick = onFavorite) {
-                    LIcon(R.drawable.lucide_ic_heart, "Curtir música", Modifier.size(27.dp),
+                    LIcon(LucideR.drawable.lucide_ic_heart, "Curtir música", Modifier.size(27.dp),
                         if (isFavorite) c.accent else c.text)
                 }
             }
@@ -805,23 +806,23 @@ private fun NativePlayerScreen(
             Spacer(Modifier.height(17.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onPrevious) { LIcon(R.drawable.lucide_ic_skip_back, "Anterior", Modifier.size(28.dp)) }
+                IconButton(onClick = onPrevious) { LIcon(LucideR.drawable.lucide_ic_skip_back, "Anterior", Modifier.size(28.dp)) }
                 FilledIconButton(onClick = { playback.toggle() }, modifier = Modifier.size(73.dp),
                     enabled = !playback.resolvingAudio,
                     colors = IconButtonDefaults.filledIconButtonColors(containerColor = c.accent, contentColor = c.onAccent)) {
                     if (playback.resolvingAudio || playback.buffering) CircularProgressIndicator(
                         Modifier.size(26.dp), strokeWidth = 2.dp, color = c.onAccent)
-                    else LIcon(if (playback.playing) R.drawable.lucide_ic_pause else R.drawable.lucide_ic_play,
+                    else LIcon(if (playback.playing) LucideR.drawable.lucide_ic_pause else LucideR.drawable.lucide_ic_play,
                         "Tocar ou pausar", Modifier.size(32.dp), c.onAccent)
                 }
-                IconButton(onClick = onNext) { LIcon(R.drawable.lucide_ic_skip_forward, "Próxima", Modifier.size(28.dp)) }
+                IconButton(onClick = onNext) { LIcon(LucideR.drawable.lucide_ic_skip_forward, "Próxima", Modifier.size(28.dp)) }
             }
             Spacer(Modifier.weight(0.35f))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                LIcon(R.drawable.lucide_ic_audio_lines, null, Modifier.size(21.dp), c.muted)
+                LIcon(LucideR.drawable.lucide_ic_audio_lines, null, Modifier.size(21.dp), c.muted)
                 Text(if (playback.sourceBitrateKbps > 0) "Áudio original: ${playback.sourceBitrateKbps} kbps (estimado)"
                     else "Áudio original da fonte", color = c.muted, fontSize = 11.sp)
-                LIcon(R.drawable.lucide_ic_list_music, null, Modifier.size(21.dp), c.muted)
+                LIcon(LucideR.drawable.lucide_ic_list_music, null, Modifier.size(21.dp), c.muted)
             }
         }
     }
