@@ -16,7 +16,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.animateColorAsState
 import kotlinx.coroutines.isActive
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
