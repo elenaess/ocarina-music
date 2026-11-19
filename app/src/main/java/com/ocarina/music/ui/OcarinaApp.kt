@@ -5,13 +5,12 @@ import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -227,8 +226,8 @@ fun OcarinaApp() {
 
         AnimatedVisibility(
             visible = showFullPlayer && playback.currentSong != null,
-            enter = slideInVertically(animationSpec = tween(90), initialOffsetY = { it / 8 }) + fadeIn(tween(90)),
-            exit = slideOutVertically(animationSpec = tween(90), targetOffsetY = { it / 8 }) + fadeOut(tween(90)),
+            enter = fadeIn(tween(90)),
+            exit = fadeOut(tween(90)),
             modifier = Modifier.fillMaxSize().zIndex(1f),
         ) {
             NativePlayerScreen(
@@ -243,7 +242,7 @@ fun OcarinaApp() {
             AlertDialog(
                 onDismissRequest = { showInfo = false },
                 title = { Text("Ocarina") },
-                text = { Text("Versão 0.3.2. Seu perfil é local; login Firebase e integração com Psiu ainda não estão ativos. Reprodução experimental via fontes não oficiais do YouTube Music. Recursos de playlist e download serão adicionados futuramente.") },
+                text = { Text("Versão 0.3.3. Seu perfil é local; login Firebase e integração com Psiu ainda não estão ativos. Reprodução experimental via fontes não oficiais do YouTube Music. Recursos de playlist e download serão adicionados futuramente.") },
                 confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Entendi") } },
             )
         }
@@ -251,42 +250,41 @@ fun OcarinaApp() {
 }
 
 
-/** Native lightweight navigation: no Material spring animation or double-composed page. */
+/** Navegação compacta com Lucide. */
 @Composable
 private fun FastNav(screen: Screen, onSelect: (Screen) -> Unit) {
     val c = ocarinaColors
-    val tabs = remember {
-        listOf(
-            Triple(Screen.HOME, "Início", LucideR.drawable.lucide_ic_house),
-            Triple(Screen.SEARCH, "Buscar", LucideR.drawable.lucide_ic_search),
-            Triple(Screen.LIBRARY, "Biblioteca", LucideR.drawable.lucide_ic_library),
-            Triple(Screen.LIKED, "Curtidas", LucideR.drawable.lucide_ic_heart),
-        )
-    }
+    val tabs = remember { listOf(
+        Triple(Screen.HOME, "Início", LucideR.drawable.lucide_ic_house),
+        Triple(Screen.SEARCH, "Buscar", LucideR.drawable.lucide_ic_search),
+        Triple(Screen.LIBRARY, "Biblioteca", LucideR.drawable.lucide_ic_library),
+        Triple(Screen.LIKED, "Curtidas", LucideR.drawable.lucide_ic_heart)
+    ) }
     Row(
-        Modifier.fillMaxWidth().height(70.dp).background(c.background).padding(horizontal = 7.dp),
+        Modifier.fillMaxWidth().background(c.background)
+            .navigationBarsPadding().height(52.dp)
+            .padding(horizontal = 12.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        tabs.forEach { (tab, label, drawable) ->
+        tabs.forEach { (tab, label, ic) ->
             val active = tab == screen
             val tint by animateColorAsState(
-                targetValue = if (active) c.accent else c.muted,
-                animationSpec = tween(90), label = "navigation-icon",
+                if (active) c.accent else c.muted,
+                animationSpec = tween(90), label = "nav"
             )
-            Column(
-                Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(15.dp))
-                    .clickable { if (screen != tab) onSelect(tab) },
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
+            val touch = remember { MutableInteractionSource() }
+            Box(
+                Modifier.weight(1f).fillMaxHeight()
+                    .clickable(
+                        interactionSource = touch,
+                        indication = null
+                    ) { if (!active) onSelect(tab) },
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    Modifier.size(width = 55.dp, height = 32.dp).clip(RoundedCornerShape(18.dp))
-                        .background(if (active) c.softAccent else Color.Transparent),
-                    contentAlignment = Alignment.Center,
-                ) { LIcon(drawable, label, Modifier.size(21.dp), tint) }
-                Text(label, fontSize = 10.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                    color = tint, maxLines = 1)
+                LIcon(ic, label, Modifier.size(
+                    if (active) 25.dp else 24.dp
+                ), tint)
             }
         }
     }
@@ -345,13 +343,6 @@ private fun AppHeader(screen: Screen, onProfile: () -> Unit, onBack: () -> Unit,
 }
 
 @Composable
-private fun Greeting() {
-    val time = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-    val greeting = when (time) { in 5..11 -> "Bom dia"; in 12..17 -> "Boa tarde"; else -> "Boa noite" }
-    Text(greeting, color = ocarinaColors.text, fontSize = 33.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.65).sp)
-}
-
-@Composable
 private fun HomePage(
     listState: LazyListState,
     songs: List<Song>, recent: List<Song>, favorites: List<Song>,
@@ -362,28 +353,9 @@ private fun HomePage(
     val c = ocarinaColors
     LazyColumn(
         modifier = Modifier.fillMaxSize(), state = listState,
-        contentPadding = PaddingValues(start = 21.dp, end = 21.dp, top = 12.dp, bottom = 30.dp),
+        contentPadding = PaddingValues(start = 17.dp, end = 17.dp, top = 8.dp, bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        item { Greeting() }
-        item {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                items(listOf("Início", "Músicas", "Playlists", "Rádios")) { title ->
-                    val active = title == "Início"
-                    Surface(
-                        onClick = { if (title == "Playlists") onLibrary() else if (!active) onSearch() },
-                        shape = RoundedCornerShape(50),
-                        color = if (active) c.accent else c.surface,
-                        border = if (active) null else BorderStroke(1.dp, c.outline),
-                    ) {
-                        Text(title, modifier = Modifier.padding(horizontal = 17.dp, vertical = 10.dp),
-                            color = if (active) c.onAccent else c.text,
-                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-                            fontSize = 13.sp)
-                    }
-                }
-            }
-        }
         item {
             Column {
                 SectionHeader("Continue ouvindo", onClick = if (recent.isNotEmpty()) onLibrary else null)
@@ -411,7 +383,7 @@ private fun HomePage(
                 else if (songs.isEmpty()) EmptyPanel("Sem sugestões no momento", "Experimente pesquisar uma música.",
                     LucideR.drawable.lucide_ic_search, onSearch, "Buscar")
                 else LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(songs.take(10), key = { it.videoId }) { song ->
+                    items(songs.take(8), key = { it.videoId }) { song ->
                         ArtworkCard(song, onClick = { onPlay(song, songs) }, wide = true)
                     }
                 }
@@ -421,7 +393,7 @@ private fun HomePage(
             Column {
                 SectionHeader("Músicas para explorar", onClick = onSearch)
                 Spacer(Modifier.height(12.dp))
-                songs.take(5).forEach { song ->
+                songs.take(4).forEach { song ->
                     SongRow(song, favorites.any { it.videoId == song.videoId },
                         onOpen = { onPlay(song, songs) }, onFavorite = { onFavorite(song) })
                 }
@@ -830,8 +802,7 @@ private fun NativePlayerScreen(
             BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 val coverSize = minOf(maxWidth, 365.dp)
                 AlbumArtwork(song, "Capa de ${song.title}", highQuality = true,
-                    modifier = Modifier.size(coverSize).shadow(6.dp, RoundedCornerShape(23.dp))
-                        .clip(RoundedCornerShape(23.dp)).background(c.artworkSurface))
+                    modifier = Modifier.size(coverSize).clip(RoundedCornerShape(23.dp)).background(c.artworkSurface))
             }
             Spacer(Modifier.weight(0.65f))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

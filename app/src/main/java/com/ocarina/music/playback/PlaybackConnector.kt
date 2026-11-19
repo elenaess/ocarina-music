@@ -102,7 +102,7 @@ class PlaybackConnector(context: Context) {
         playing = player.isPlaying
         buffering = player.playbackState == Player.STATE_BUFFERING
         val item = player.currentMediaItem
-        if (item != null) {
+        if (item != null && !resolvingAudio && item.mediaId == currentSong?.videoId) {
             val md = item.mediaMetadata
             currentSong = Song(
                 item.mediaId,
@@ -117,13 +117,10 @@ class PlaybackConnector(context: Context) {
         resolving?.cancel()
         prefetchJob?.cancel()
         if (!isRetry) retryingSource = false
+        resolvingAudio = true
+        controller?.pause()
         currentSong = song
         sourceBitrateKbps = 0L
-        // Stop old audio immediately; a newly tapped search result must not keep it audible.
-        controller?.pause()
-        controller?.stop()
-        controller?.clearMediaItems()
-        resolvingAudio = true
         error = null
         resolving = scope.launch {
             try {
@@ -169,6 +166,11 @@ class PlaybackConnector(context: Context) {
         currentSong?.let { song -> play(song, refresh = true) }
     }
     fun toggle() {
+        if (resolvingAudio) return
+        if (controller?.currentMediaItem?.mediaId != currentSong?.videoId || error != null) {
+            retryCurrent()
+            return
+        }
         controller?.let { if (it.isPlaying) it.pause() else it.play() }
     }
     fun seekTo(ms: Long) { controller?.seekTo(ms.coerceAtLeast(0L)) }
