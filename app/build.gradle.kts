@@ -6,14 +6,14 @@ plugins {
 
 android {
     namespace = "com.ocarina.music"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.ocarina.music"
         minSdk = 26
         targetSdk = 35
         versionCode = 5
-        versionName = "0.2.1"
+        versionName = "0.3.0"
     }
     buildTypes {
         release { isMinifyEnabled = false }
@@ -45,7 +45,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.animation:animation")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
+    implementation("com.composables:icons-lucide-android:2.2.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.2")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

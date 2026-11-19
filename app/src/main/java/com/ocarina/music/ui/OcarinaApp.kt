@@ -1,36 +1,22 @@
 package com.ocarina.music.ui
 
+import android.app.Activity
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.ArrowOutward
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Explore
-import androidx.compose.material.icons.rounded.Favorite
-import androidx.compose.material.icons.rounded.FavoriteBorder
-import androidx.compose.material.icons.rounded.GraphicEq
-import androidx.compose.material.icons.rounded.Headphones
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.LibraryMusic
-import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.SkipNext
-import androidx.compose.material.icons.rounded.SkipPrevious
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,475 +27,713 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.core.view.WindowInsetsControllerCompat
 import coil.compose.AsyncImage
+import com.ocarina.music.R
 import com.ocarina.music.data.FavoritesStore
+import com.ocarina.music.data.OcarinaSettings
 import com.ocarina.music.data.Song
 import com.ocarina.music.data.YouTubeMusicSearch
 import com.ocarina.music.playback.PlaybackConnector
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import java.util.Locale
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 
-private enum class Tab { DISCOVER, SEARCH, LIBRARY }
+private enum class Screen { HOME, SEARCH, LIBRARY, LIKED, PROFILE }
+
+/** Every interface icon is a Lucide vector resource. The brand mark is its own vector. */
+@Composable
+private fun LIcon(@DrawableRes icon: Int, label: String?, modifier: Modifier = Modifier, tint: Color = ocarinaColors.text) {
+    Icon(painter = painterResource(icon), contentDescription = label, modifier = modifier, tint = tint)
+}
 
 @Composable
-fun OcarinaApp() = OcarinaTheme {
+private fun OcarinaMark(modifier: Modifier = Modifier, tint: Color = ocarinaColors.text) {
+    Icon(painterResource(R.drawable.ocarina_logo), contentDescription = "Ocarina", modifier = modifier, tint = tint)
+}
+
+@Composable
+fun OcarinaApp() {
     val context = LocalContext.current
-    val searchClient = remember { YouTubeMusicSearch() }
-    val store = remember { FavoritesStore(context) }
-    val favorites = remember { mutableStateListOf<Song>().apply { addAll(store.load()) } }
-    var tab by remember { mutableStateOf(Tab.DISCOVER) }
-    var searchText by remember { mutableStateOf("") }
-    var songs by remember { mutableStateOf<List<Song>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var reloadIndex by remember { mutableIntStateOf(0) }
-    val playback = remember { PlaybackConnector(context) }
-    DisposableEffect(playback) { onDispose { playback.close() } }
-    var showFullPlayer by remember { mutableStateOf(false) }
-    var playQueue by remember { mutableStateOf<List<Song>>(emptyList()) }
-    fun playSong(song: Song) {
-        val source = if (tab == Tab.LIBRARY) favorites.toList() else songs
-        playQueue = source.ifEmpty { listOf(song) }
-        val idx = playQueue.indexOfFirst { it.videoId == song.videoId }
-        playback.play(song, playQueue.getOrNull(idx + 1))
-        showFullPlayer = true
-    }
-    fun nextSong() {
-        val currentId = playback.currentSong?.videoId
-        val idx = playQueue.indexOfFirst { it.videoId == currentId }
-        playQueue.getOrNull(idx + 1)?.let { playback.play(it, playQueue.getOrNull(idx + 2)) }
-    }
-    fun previousSong() {
-        val currentId = playback.currentSong?.videoId
-        val idx = playQueue.indexOfFirst { it.videoId == currentId }
-        playQueue.getOrNull(idx - 1)?.let { playback.play(it, playQueue.getOrNull(idx)) }
-    }
-    var showInfo by remember { mutableStateOf(false) }
-
-    fun toggleFavorite(song: Song) {
-        val match = favorites.indexOfFirst { it.videoId == song.videoId }
-        if (match >= 0) favorites.removeAt(match) else favorites.add(0, song)
-        store.save(favorites.toList())
-    }
-
-    LaunchedEffect(tab, searchText, reloadIndex) {
-        if (tab == Tab.LIBRARY) return@LaunchedEffect
-        val term = if (tab == Tab.DISCOVER) "música brasileira contemporânea" else searchText.trim()
-        if (term.isBlank()) {
-            songs = emptyList()
-            error = null
-            isLoading = false
-            return@LaunchedEffect
-        }
-        if (tab == Tab.SEARCH) delay(400)
-        isLoading = true
-        error = null
-        try {
-            songs = searchClient.search(term)
-            if (songs.isEmpty()) error = "Nenhuma faixa encontrada. Experimente outra busca."
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            songs = emptyList()
-            error = e.message ?: "Não foi possível acessar o catálogo agora."
-        } finally {
-            isLoading = false
-        }
-    }
-
-    Scaffold(
-        containerColor = Ink,
-        topBar = {
-            Row(
-                modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(start = 22.dp, end = 18.dp, top = 12.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier.size(43.dp).clip(RoundedCornerShape(16.dp)).background(Lime),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("o", fontWeight = FontWeight.Black, fontSize = 30.sp, color = Ink, lineHeight = 30.sp)
-                }
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text("ocarina", fontSize = 23.sp, fontWeight = FontWeight.Bold, color = WarmWhite, lineHeight = 24.sp)
-                    Text("o seu som, no seu ritmo.", fontSize = 11.sp, color = Muted)
-                }
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = { showInfo = true }) {
-                    Icon(Icons.Rounded.Info, "Sobre o app", tint = Muted)
-                }
+    val settings = remember(context) { OcarinaSettings(context) }
+    var dark by remember { mutableStateOf(settings.isDark()) }
+    OcarinaTheme(dark = dark) {
+        val c = ocarinaColors
+        SideEffect {
+            (context as? Activity)?.window?.let { window ->
+                window.statusBarColor = if (dark) android.graphics.Color.rgb(23, 20, 25)
+                    else android.graphics.Color.rgb(251, 247, 247)
+                window.navigationBarColor = if (dark) android.graphics.Color.rgb(23, 20, 25)
+                    else android.graphics.Color.rgb(251, 247, 247)
+                val controller = WindowInsetsControllerCompat(window, window.decorView)
+                controller.isAppearanceLightStatusBars = !dark
+                controller.isAppearanceLightNavigationBars = !dark
             }
-        },
-        bottomBar = {
-            Column {
-                playback.currentSong?.let { playingSong ->
-                    MiniPlayer(playingSong, playback, onExpand = { showFullPlayer = true }, onNext = ::nextSong)
+        }
+        val searchClient = remember { YouTubeMusicSearch() }
+        val store = remember(context) { FavoritesStore(context) }
+        val favorites = remember { mutableStateListOf<Song>().apply { addAll(store.load()) } }
+        val recent = remember { mutableStateListOf<Song>().apply { addAll(settings.recentlyPlayed()) } }
+        val playback = remember(context) { PlaybackConnector(context) }
+        DisposableEffect(playback) { onDispose { playback.close() } }
+        var screen by remember { mutableStateOf(Screen.HOME) }
+        var previousScreen by remember { mutableStateOf(Screen.HOME) }
+        var searchText by remember { mutableStateOf("") }
+        var discoverSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
+        var searchSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
+        var discoveryLoading by remember { mutableStateOf(true) }
+        var searchLoading by remember { mutableStateOf(false) }
+        var discoverError by remember { mutableStateOf<String?>(null) }
+        var searchError by remember { mutableStateOf<String?>(null) }
+        var searchRefresh by remember { mutableIntStateOf(0) }
+        var discoverRefresh by remember { mutableIntStateOf(0) }
+        var showFullPlayer by remember { mutableStateOf(false) }
+        var showInfo by remember { mutableStateOf(false) }
+        var queue by remember { mutableStateOf<List<Song>>(emptyList()) }
+
+        fun openProfile() {
+            if (screen != Screen.PROFILE) previousScreen = screen
+            screen = Screen.PROFILE
+        }
+        fun toggleFavorite(song: Song) {
+            val index = favorites.indexOfFirst { it.videoId == song.videoId }
+            if (index < 0) favorites.add(0, song) else favorites.removeAt(index)
+            store.save(favorites.toList())
+        }
+        fun playSong(song: Song, source: List<Song>) {
+            queue = source.ifEmpty { listOf(song) }
+            val index = queue.indexOfFirst { it.videoId == song.videoId }
+            playback.play(song, queue.getOrNull(index + 1))
+            recent.removeAll { it.videoId == song.videoId }
+            recent.add(0, song)
+            if (recent.size > 12) recent.removeAt(recent.lastIndex)
+            settings.addRecent(song)
+            showFullPlayer = true
+        }
+        fun next() {
+            val i = queue.indexOfFirst { it.videoId == playback.currentSong?.videoId }
+            queue.getOrNull(i + 1)?.let { playback.play(it, queue.getOrNull(i + 2)) }
+        }
+        fun previous() {
+            val i = queue.indexOfFirst { it.videoId == playback.currentSong?.videoId }
+            queue.getOrNull(i - 1)?.let { playback.play(it, queue.getOrNull(i)) }
+        }
+
+        LaunchedEffect(discoverRefresh) {
+            discoveryLoading = true
+            discoverError = null
+            try { discoverSongs = searchClient.search("música brasileira contemporânea") }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { discoverError = e.message ?: "Não foi possível consultar o catálogo." }
+            finally { discoveryLoading = false }
+        }
+        LaunchedEffect(screen, searchText, searchRefresh) {
+            if (screen != Screen.SEARCH) return@LaunchedEffect
+            val query = searchText.trim()
+            if (query.isBlank()) { searchSongs = emptyList(); searchError = null; searchLoading = false; return@LaunchedEffect }
+            delay(350)
+            searchLoading = true
+            searchError = null
+            try { searchSongs = searchClient.search(query) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { searchSongs = emptyList(); searchError = e.message ?: "Não foi possível buscar." }
+            finally { searchLoading = false }
+        }
+
+        Scaffold(
+            containerColor = c.background,
+            topBar = {
+                AppHeader(
+                    screen = screen,
+                    onProfile = ::openProfile,
+                    onBack = { screen = previousScreen },
+                    onSearch = { screen = Screen.SEARCH },
+                )
+            },
+            bottomBar = {
+                Column(Modifier.background(c.background)) {
+                    playback.currentSong?.let { song ->
+                        MiniPlayer(song, playback, onExpand = { showFullPlayer = true })
+                    }
+                    NavigationBar(containerColor = c.background, tonalElevation = 0.dp, modifier = Modifier.height(76.dp)) {
+                        listOf(
+                            Triple(Screen.HOME, "Início", R.drawable.lucide_ic_house),
+                            Triple(Screen.SEARCH, "Buscar", R.drawable.lucide_ic_search),
+                            Triple(Screen.LIBRARY, "Biblioteca", R.drawable.lucide_ic_library),
+                            Triple(Screen.LIKED, "Curtidas", R.drawable.lucide_ic_heart),
+                        ).forEach { (tab, label, icon) ->
+                            val active = screen == tab
+                            NavigationBarItem(
+                                selected = active,
+                                onClick = { screen = tab },
+                                icon = { LIcon(icon, label, Modifier.size(23.dp), if (active) c.accent else c.muted) },
+                                label = { Text(label, fontSize = 10.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal) },
+                                alwaysShowLabel = true,
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = c.accent,
+                                    selectedTextColor = c.accent,
+                                    indicatorColor = c.softAccent,
+                                    unselectedIconColor = c.muted,
+                                    unselectedTextColor = c.muted,
+                                ),
+                            )
+                        }
+                    }
                 }
-            NavigationBar(containerColor = Card, tonalElevation = 0.dp) {
-                listOf(
-                    Triple(Tab.DISCOVER, "Descobrir", Icons.Rounded.Explore),
-                    Triple(Tab.SEARCH, "Buscar", Icons.Rounded.Search),
-                    Triple(Tab.LIBRARY, "Biblioteca", Icons.Rounded.LibraryMusic),
-                ).forEach { (value, label, icon) ->
-                    NavigationBarItem(
-                        selected = tab == value,
-                        onClick = { tab = value },
-                        icon = { Icon(icon, contentDescription = label) },
-                        label = { Text(label, fontSize = 11.sp) },
-                        alwaysShowLabel = true,
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Ink,
-                            selectedTextColor = Lime,
-                            indicatorColor = Lime,
-                            unselectedIconColor = Muted,
-                            unselectedTextColor = Muted,
-                        ),
+            },
+        ) { insets ->
+            AnimatedContent(
+                targetState = screen,
+                modifier = Modifier.fillMaxSize().padding(insets),
+                transitionSpec = { fadeIn(tween(170)) togetherWith fadeOut(tween(100)) },
+                label = "ocarina-screen",
+            ) { page ->
+                when (page) {
+                    Screen.HOME -> HomePage(
+                        songs = discoverSongs, recent = recent, favorites = favorites,
+                        loading = discoveryLoading, error = discoverError,
+                        onRetry = { discoverRefresh++ },
+                        onPlay = { song, source -> playSong(song, source) },
+                        onFavorite = ::toggleFavorite,
+                        onSearch = { screen = Screen.SEARCH },
+                        onLibrary = { screen = Screen.LIBRARY },
+                    )
+                    Screen.SEARCH -> SearchPage(
+                        text = searchText, onText = { searchText = it }, songs = searchSongs,
+                        favorites = favorites, loading = searchLoading, error = searchError,
+                        onRetry = { searchRefresh++ },
+                        onPlay = { song -> playSong(song, searchSongs) }, onFavorite = ::toggleFavorite,
+                    )
+                    Screen.LIBRARY -> LibraryPage(
+                        favorites = favorites, recent = recent,
+                        onLiked = { screen = Screen.LIKED }, onPlay = { song -> playSong(song, recent) },
+                        onFavorite = ::toggleFavorite, onSearch = { screen = Screen.SEARCH }, onInfo = { showInfo = true },
+                    )
+                    Screen.LIKED -> LikedPage(
+                        favorites = favorites, onPlay = { song -> playSong(song, favorites.toList()) },
+                        onFavorite = ::toggleFavorite, onExplore = { screen = Screen.SEARCH },
+                    )
+                    Screen.PROFILE -> ProfilePage(
+                        isDark = dark, favorites = favorites.size, recent = recent.size,
+                        onTheme = { value -> dark = value; settings.setDark(value) },
+                        onInfo = { showInfo = true }, onLiked = { screen = Screen.LIKED },
                     )
                 }
             }
-            }
-        },
-    ) { padding ->
-        AnimatedContent(
-            targetState = tab,
-            modifier = Modifier.fillMaxSize().padding(padding),
-            transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(110)) },
-            label = "ocarina-navigation",
-        ) { page ->
-            when (page) {
-                Tab.DISCOVER -> CatalogPage(
-                    songs = songs,
-                    favorites = favorites,
-                    isLoading = isLoading,
-                    error = error,
-                    onRetry = { reloadIndex++ },
-                    onOpen = ::playSong,
-                    onToggle = ::toggleFavorite,
-                    onSearchClick = { tab = Tab.SEARCH },
-                )
-                Tab.SEARCH -> SearchPage(
-                    searchText = searchText,
-                    onSearchChange = { searchText = it },
-                    songs = songs,
-                    favorites = favorites,
-                    isLoading = isLoading,
-                    error = error,
-                    onRetry = { reloadIndex++ },
-                    onOpen = ::playSong,
-                    onToggle = ::toggleFavorite,
-                )
-                Tab.LIBRARY -> LibraryPage(
-                    favorites = favorites,
-                    onOpen = ::playSong,
-                    onToggle = ::toggleFavorite,
-                    onExplore = { tab = Tab.SEARCH },
-                )
-            }
+        }
+
+        if (showFullPlayer && playback.currentSong != null) {
+            NativePlayerScreen(
+                playback = playback,
+                isFavorite = favorites.any { it.videoId == playback.currentSong?.videoId },
+                onFavorite = { playback.currentSong?.let(::toggleFavorite) },
+                onClose = { showFullPlayer = false }, onNext = ::next, onPrevious = ::previous,
+            )
+        }
+        if (showInfo) {
+            AlertDialog(
+                onDismissRequest = { showInfo = false },
+                title = { Text("Ocarina") },
+                text = { Text("Versão 0.3.0. Seu perfil é local; login Firebase e integração com Psiu ainda não estão ativos. Reprodução experimental via fontes não oficiais do YouTube Music. Recursos de playlist e download serão adicionados futuramente.") },
+                confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Entendi") } },
+            )
         }
     }
-
-    if (showFullPlayer && playback.currentSong != null) {
-        NativePlayerScreen(
-            playback = playback,
-            isFavorite = favorites.any { it.videoId == playback.currentSong?.videoId },
-            onFavorite = { playback.currentSong?.let(::toggleFavorite) },
-            onClose = { showFullPlayer = false },
-            onNext = ::nextSong,
-            onPrevious = ::previousSong,
-        )
-    }
-    if (showInfo) {
-        AlertDialog(
-            onDismissRequest = { showInfo = false },
-            title = { Text("Sobre o Ocarina Music") },
-            text = { Text(
-                "Versão 0.2.1 · Player nativo de áudio (Media3). Catálogo e fonte musical experimentais " +
-                    "via YouTube Music / NewPipe. Algumas músicas podem não funcionar. " +
-                    "Favoritos são armazenados no dispositivo. Ocarina não é afiliado ao YouTube ou Spotify."
-            ) },
-            confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Entendi") } },
-        )
-    }
-
 }
 
 @Composable
-private fun CatalogPage(
-    songs: List<Song>, favorites: List<Song>, isLoading: Boolean, error: String?,
-    onRetry: () -> Unit, onOpen: (Song) -> Unit, onToggle: (Song) -> Unit,
-    onSearchClick: () -> Unit,
-) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+private fun AppHeader(screen: Screen, onProfile: () -> Unit, onBack: () -> Unit, onSearch: () -> Unit) {
+    val c = ocarinaColors
+    Row(
+        Modifier.fillMaxWidth().statusBarsPadding().padding(start = 18.dp, end = 18.dp, top = 13.dp, bottom = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        item {
-            Spacer(Modifier.height(12.dp))
-            HeroCard(onSearchClick)
-            Spacer(Modifier.height(24.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Para descobrir", color = WarmWhite, fontWeight = FontWeight.Bold, fontSize = 25.sp)
-                    Text("Uma seleção direto do catálogo musical", color = Muted, fontSize = 13.sp)
+        if (screen == Screen.PROFILE) {
+            IconButton(onClick = onBack) { LIcon(R.drawable.lucide_ic_arrow_left, "Voltar", Modifier.size(23.dp)) }
+        } else {
+            OcarinaMark(Modifier.size(48.dp))
+        }
+        Spacer(Modifier.width(6.dp))
+        Text(if (screen == Screen.PROFILE) "Perfil" else "Ocarina", color = c.text,
+            fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp)
+        Spacer(Modifier.weight(1f))
+        if (screen != Screen.SEARCH && screen != Screen.PROFILE) {
+            IconButton(onClick = onSearch) { LIcon(R.drawable.lucide_ic_search, "Buscar", Modifier.size(22.dp)) }
+        }
+        if (screen != Screen.PROFILE) {
+            IconButton(onClick = onProfile) {
+                Box(Modifier.size(37.dp).clip(CircleShape).background(c.elevated), contentAlignment = Alignment.Center) {
+                    LIcon(R.drawable.lucide_ic_user_round, "Abrir perfil", Modifier.size(19.dp))
                 }
-                Icon(Icons.Rounded.GraphicEq, null, tint = Lime)
             }
-            Spacer(Modifier.height(8.dp))
         }
-        catalogItems(songs, favorites, isLoading, error, onRetry, onOpen, onToggle)
     }
 }
 
 @Composable
-private fun HeroCard(onClick: () -> Unit) {
-    Box(
-        modifier = Modifier.fillMaxWidth().height(222.dp)
-            .clip(RoundedCornerShape(29.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFFD5F2BA), Color(0xFF92BC9B), Color(0xFF50806E))))
-            .clickable(onClick = onClick)
+private fun Greeting() {
+    val time = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    val greeting = when (time) { in 5..11 -> "Bom dia"; in 12..17 -> "Boa tarde"; else -> "Boa noite" }
+    Text(greeting, color = ocarinaColors.text, fontSize = 33.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1.3).sp)
+}
+
+@Composable
+private fun HomePage(
+    songs: List<Song>, recent: List<Song>, favorites: List<Song>,
+    loading: Boolean, error: String?, onRetry: () -> Unit,
+    onPlay: (Song, List<Song>) -> Unit, onFavorite: (Song) -> Unit,
+    onSearch: () -> Unit, onLibrary: () -> Unit,
+) {
+    val c = ocarinaColors
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 21.dp, end = 21.dp, top = 12.dp, bottom = 30.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        Box(Modifier.align(Alignment.TopEnd).offset(x = 36.dp, y = (-50).dp)
-            .size(210.dp).clip(CircleShape).background(Color.White.copy(alpha = .12f)))
-        Box(Modifier.align(Alignment.BottomEnd).offset(x = 55.dp, y = 73.dp)
-            .size(180.dp).clip(CircleShape).background(Ink.copy(alpha = .15f)))
-        Column(Modifier.fillMaxHeight().padding(25.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Headphones, null, tint = Ink)
-                Spacer(Modifier.width(7.dp))
-                Text("SEU SOM. SUAS REGRAS.", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Ink, letterSpacing = 1.1.sp)
-            }
-            Text("A música\né sua.", fontSize = 41.sp, lineHeight = 41.sp, fontWeight = FontWeight.Black, color = Ink)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Explore o que te move", color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                Spacer(Modifier.width(8.dp))
-                Icon(Icons.Rounded.ArrowOutward, null, tint = Ink, modifier = Modifier.size(17.dp))
+        item { Greeting() }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                items(listOf("Início", "Músicas", "Playlists", "Rádios")) { title ->
+                    val active = title == "Início"
+                    Surface(
+                        onClick = { if (title == "Playlists") onLibrary() else if (!active) onSearch() },
+                        shape = RoundedCornerShape(50),
+                        color = if (active) c.accent else c.surface,
+                        border = if (active) null else BorderStroke(1.dp, c.outline),
+                    ) {
+                        Text(title, modifier = Modifier.padding(horizontal = 17.dp, vertical = 10.dp),
+                            color = if (active) c.onAccent else c.text,
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                            fontSize = 13.sp)
+                    }
+                }
             }
         }
+        item {
+            Column {
+                SectionHeader("Continue ouvindo", onClick = if (recent.isNotEmpty()) onLibrary else null)
+                Spacer(Modifier.height(14.dp))
+                if (recent.isNotEmpty()) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(recent.take(6), key = { it.videoId }) { song ->
+                            ArtworkCard(song, onClick = { onPlay(song, recent) })
+                        }
+                    }
+                } else {
+                    EmptyPanel("Seu histórico começa aqui", "Escolha uma música para encontrar suas últimas faixas neste espaço.",
+                        R.drawable.lucide_ic_headphones, onSearch, "Encontrar músicas")
+                }
+            }
+        }
+        item {
+            Column {
+                SectionHeader("Descobertas da semana", onClick = onSearch)
+                Spacer(Modifier.height(5.dp))
+                Text("Explore novas faixas do catálogo", color = c.muted, fontSize = 12.sp)
+                Spacer(Modifier.height(13.dp))
+                if (loading) LoadingRow()
+                else if (error != null) ErrorPanel(error, onRetry)
+                else if (songs.isEmpty()) EmptyPanel("Sem sugestões no momento", "Experimente pesquisar uma música.",
+                    R.drawable.lucide_ic_search, onSearch, "Buscar")
+                else LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(songs.take(10), key = { it.videoId }) { song ->
+                        ArtworkCard(song, onClick = { onPlay(song, songs) }, wide = true)
+                    }
+                }
+            }
+        }
+        item {
+            Column {
+                SectionHeader("Músicas para explorar", onClick = onSearch)
+                Spacer(Modifier.height(12.dp))
+                songs.take(5).forEach { song ->
+                    SongRow(song, favorites.any { it.videoId == song.videoId },
+                        onOpen = { onPlay(song, songs) }, onFavorite = { onFavorite(song) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String, onClick: (() -> Unit)? = null) {
+    val c = ocarinaColors
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, color = c.text, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        if (onClick != null) IconButton(onClick = onClick, modifier = Modifier.size(34.dp)) {
+            LIcon(R.drawable.lucide_ic_chevron_right, "Ver mais", Modifier.size(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun ArtworkCard(song: Song, onClick: () -> Unit, wide: Boolean = false) {
+    val c = ocarinaColors
+    val size = if (wide) 178.dp else 142.dp
+    Column(Modifier.width(size).clickable(onClick = onClick)) {
+        Box(Modifier.size(size).clip(RoundedCornerShape(19.dp)).background(c.artworkSurface)) {
+            AsyncImage(model = song.artwork, contentDescription = song.title,
+                contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).size(36.dp)
+                .clip(CircleShape).background(c.surface), contentAlignment = Alignment.Center) {
+                LIcon(R.drawable.lucide_ic_play, "Tocar ${song.title}", Modifier.size(19.dp))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(song.title, color = c.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(song.artist, color = c.muted, fontSize = 11.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
 @Composable
 private fun SearchPage(
-    searchText: String, onSearchChange: (String) -> Unit,
-    songs: List<Song>, favorites: List<Song>, isLoading: Boolean, error: String?,
-    onRetry: () -> Unit, onOpen: (Song) -> Unit, onToggle: (Song) -> Unit,
+    text: String, onText: (String) -> Unit, songs: List<Song>, favorites: List<Song>,
+    loading: Boolean, error: String?, onRetry: () -> Unit,
+    onPlay: (Song) -> Unit, onFavorite: (Song) -> Unit,
 ) {
+    val c = ocarinaColors
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            Text("O que vamos ouvir?", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = WarmWhite)
-            Spacer(Modifier.height(17.dp))
+            Text("O que vamos ouvir?", color = c.text, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(14.dp))
             OutlinedTextField(
-                value = searchText,
-                onValueChange = onSearchChange,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                placeholder = { Text("Músicas, artistas, álbuns…", color = Muted) },
-                leadingIcon = { Icon(Icons.Rounded.Search, null, tint = Lime) },
-                trailingIcon = {
-                    if (searchText.isNotEmpty()) IconButton(onClick = { onSearchChange("") }) {
-                        Icon(Icons.Rounded.Close, "Limpar busca")
-                    }
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                value = text, onValueChange = onText, modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Músicas, artistas e álbuns", color = c.muted) },
+                leadingIcon = { LIcon(R.drawable.lucide_ic_search, null, Modifier.size(21.dp), c.accent) },
+                trailingIcon = { if (text.isNotEmpty()) IconButton(onClick = { onText("") }) {
+                    LIcon(R.drawable.lucide_ic_x, "Limpar busca", Modifier.size(19.dp))
+                } },
+                singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                shape = RoundedCornerShape(17.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Lime,
-                    unfocusedBorderColor = Raised,
-                    focusedContainerColor = Card,
-                    unfocusedContainerColor = Card,
+                    focusedBorderColor = c.accent, unfocusedBorderColor = c.outline,
+                    focusedContainerColor = c.surface, unfocusedContainerColor = c.surface,
                 ),
             )
-            Spacer(Modifier.height(22.dp))
-            Text(
-                if (searchText.isBlank()) "Encontre sua próxima favorita" else "Resultados para \"${searchText.take(40)}\"",
-                color = WarmWhite, fontSize = 19.sp, fontWeight = FontWeight.SemiBold
-            )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(17.dp))
+            Text(if (text.isBlank()) "Explore por aqui" else "Resultados", color = c.text,
+                fontSize = 19.sp, fontWeight = FontWeight.Bold)
         }
-        if (searchText.isBlank()) {
-            item { EmptyState("Busque por um artista ou uma música.", "Sem conta, sem complicação.") }
-        } else {
-            catalogItems(songs, favorites, isLoading, error, onRetry, onOpen, onToggle)
+        if (text.isBlank()) item { EmptyPanel("Uma nova descoberta começa na busca", "Pesquise sua próxima música favorita.", R.drawable.lucide_ic_search) }
+        else if (loading) item { LoadingRow() }
+        else if (error != null) item { ErrorPanel(error, onRetry) }
+        else if (songs.isEmpty()) item { EmptyPanel("Não encontramos resultados", "Tente outra música ou artista.", R.drawable.lucide_ic_music_2) }
+        else items(songs, key = { it.videoId }) { song ->
+            SongRow(song, favorites.any { it.videoId == song.videoId },
+                onOpen = { onPlay(song) }, onFavorite = { onFavorite(song) })
         }
     }
 }
 
 @Composable
 private fun LibraryPage(
-    favorites: List<Song>, onOpen: (Song) -> Unit, onToggle: (Song) -> Unit,
-    onExplore: () -> Unit,
+    favorites: List<Song>, recent: List<Song>,
+    onLiked: () -> Unit, onPlay: (Song) -> Unit, onFavorite: (Song) -> Unit,
+    onSearch: () -> Unit, onInfo: () -> Unit,
 ) {
+    val c = ocarinaColors
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         item {
-            Text("Sua biblioteca", fontSize = 30.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            Text("O que você ama, num só lugar.", color = Muted, fontSize = 13.sp)
-            Spacer(Modifier.height(27.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Favorite, null, tint = Lime)
-                Spacer(Modifier.width(10.dp))
-                Text("Curtidas", fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.weight(1f))
-                Text("${favorites.size} faixa(s)", color = Muted, fontSize = 12.sp)
-            }
+            Text("Sua Biblioteca", fontSize = 31.sp, fontWeight = FontWeight.Bold, color = c.text)
+            Spacer(Modifier.height(17.dp))
+            LibraryEntry(R.drawable.lucide_ic_heart, "Músicas Curtidas", "${favorites.size} músicas", onLiked)
+            LibraryEntry(R.drawable.lucide_ic_download, "Downloads", "Em desenvolvimento", onInfo)
+            LibraryEntry(R.drawable.lucide_ic_list_music, "Playlists", "Em desenvolvimento", onInfo)
+            LibraryEntry(R.drawable.lucide_ic_disc_3, "Álbuns", "Em desenvolvimento", onInfo)
+            LibraryEntry(R.drawable.lucide_ic_user_round, "Artistas", "Em desenvolvimento", onInfo)
         }
-        if (favorites.isEmpty()) {
-            item {
-                EmptyState("Ainda não tem nada por aqui.", "Curta algumas músicas para encontrá-las depois.")
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = onExplore, colors = ButtonDefaults.buttonColors(containerColor = Lime, contentColor = Ink)) {
-                    Text("Explorar músicas")
+        item {
+            Spacer(Modifier.height(9.dp))
+            SectionHeader("Tocadas recentemente")
+        }
+        if (recent.isEmpty()) item {
+            EmptyPanel("Nenhuma música recente", "Quando você ouvir uma faixa, ela aparecerá aqui.",
+                R.drawable.lucide_ic_music_2, onSearch, "Explorar músicas")
+        } else items(recent, key = { it.videoId }) { song ->
+            SongRow(song, favorites.any { it.videoId == song.videoId },
+                onOpen = { onPlay(song) }, onFavorite = { onFavorite(song) })
+        }
+    }
+}
+
+@Composable
+private fun LibraryEntry(@DrawableRes icon: Int, title: String, subtitle: String, onClick: () -> Unit) {
+    val c = ocarinaColors
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(17.dp)).clickable(onClick = onClick)
+            .padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(56.dp).clip(RoundedCornerShape(15.dp)).background(c.elevated), contentAlignment = Alignment.Center) {
+            LIcon(icon, null, Modifier.size(23.dp), c.text)
+        }
+        Spacer(Modifier.width(15.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+            Text(subtitle, fontSize = 12.sp, color = c.muted)
+        }
+        LIcon(R.drawable.lucide_ic_chevron_right, "Abrir", Modifier.size(19.dp), c.muted)
+    }
+}
+
+@Composable
+private fun LikedPage(favorites: List<Song>, onPlay: (Song) -> Unit, onFavorite: (Song) -> Unit, onExplore: () -> Unit) {
+    val c = ocarinaColors
+    LazyColumn(
+        Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Box(
+                Modifier.fillMaxWidth().height(175.dp).clip(RoundedCornerShape(24.dp))
+                    .background(Brush.linearGradient(listOf(c.softAccent, c.artworkSurface))),
+                contentAlignment = Alignment.Center,
+            ) {
+                LIcon(R.drawable.lucide_ic_heart, null, Modifier.size(67.dp), c.accent)
+            }
+            Spacer(Modifier.height(17.dp))
+            Text("Músicas Curtidas", color = c.text, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text("${favorites.size} músicas salvas neste dispositivo", color = c.muted, fontSize = 12.sp)
+            Spacer(Modifier.height(17.dp))
+            if (favorites.isNotEmpty()) FilledIconButton(
+                onClick = { onPlay(favorites.first()) },
+                modifier = Modifier.size(54.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(containerColor = c.accent, contentColor = c.onAccent),
+            ) { LIcon(R.drawable.lucide_ic_play, "Tocar todas", Modifier.size(23.dp), c.onAccent) }
+        }
+        if (favorites.isEmpty()) item {
+            EmptyPanel("Suas favoritas vão morar aqui", "Toque no coração de uma música para salvá-la.",
+                R.drawable.lucide_ic_heart, onExplore, "Encontrar músicas")
+        }
+        else items(favorites, key = { it.videoId }) { song ->
+            SongRow(song, true, onOpen = { onPlay(song) }, onFavorite = { onFavorite(song) })
+        }
+    }
+}
+
+@Composable
+private fun ProfilePage(isDark: Boolean, favorites: Int, recent: Int, onTheme: (Boolean) -> Unit, onInfo: () -> Unit, onLiked: () -> Unit) {
+    val c = ocarinaColors
+    LazyColumn(
+        Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 21.dp, vertical = 14.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        item {
+            Column {
+                Box(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(29.dp)).background(c.surface)
+                        .padding(horizontal = 22.dp, vertical = 26.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(Modifier.size(95.dp).clip(CircleShape).background(c.softAccent),
+                            contentAlignment = Alignment.Center) {
+                            LIcon(R.drawable.lucide_ic_user_round, "Avatar", Modifier.size(48.dp), c.accent)
+                        }
+                        Spacer(Modifier.height(15.dp))
+                        Text("Seu espaço", fontSize = 26.sp, color = c.text, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(5.dp))
+                        Text("Perfil local, só seu por enquanto", color = c.muted, fontSize = 13.sp)
+                        Spacer(Modifier.height(22.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            ProfileStat(favorites.toString(), "Curtidas")
+                            Box(Modifier.width(1.dp).height(37.dp).background(c.outline))
+                            ProfileStat(recent.toString(), "Recentes")
+                            Box(Modifier.width(1.dp).height(37.dp).background(c.outline))
+                            ProfileStat("0", "Playlists")
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Surface(
+                    onClick = onInfo, modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(17.dp), color = c.softAccent,
+                ) {
+                    Row(Modifier.padding(17.dp), verticalAlignment = Alignment.CenterVertically) {
+                        LIcon(R.drawable.lucide_ic_log_in, null, Modifier.size(22.dp), c.accent)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Entrar ou criar conta", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = c.text)
+                            Text("Firebase será conectado na próxima etapa", fontSize = 11.sp, color = c.muted)
+                        }
+                        LIcon(R.drawable.lucide_ic_chevron_right, null, Modifier.size(18.dp), c.accent)
+                    }
                 }
             }
-        } else {
-            items(favorites, key = { it.videoId }) { song ->
-                SongRow(song, isFavorite = true, onOpen = { onOpen(song) }, onFavorite = { onToggle(song) })
+        }
+        item {
+            Column {
+                SectionHeader("Preferências")
+                Spacer(Modifier.height(7.dp))
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface).padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    LIcon(if (isDark) R.drawable.lucide_ic_moon else R.drawable.lucide_ic_sun,
+                        null, Modifier.size(24.dp), c.accent)
+                    Spacer(Modifier.width(13.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Modo escuro", fontSize = 15.sp, color = c.text, fontWeight = FontWeight.SemiBold)
+                        Text("Altere o tema instantaneamente", fontSize = 11.sp, color = c.muted)
+                    }
+                    Switch(checked = isDark, onCheckedChange = onTheme)
+                }
+                Spacer(Modifier.height(10.dp))
+                Surface(onClick = onLiked, shape = RoundedCornerShape(18.dp), color = c.surface) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        LIcon(R.drawable.lucide_ic_heart, null, Modifier.size(23.dp), c.accent)
+                        Spacer(Modifier.width(13.dp))
+                        Text("Minhas curtidas", modifier = Modifier.weight(1f), color = c.text, fontSize = 15.sp)
+                        LIcon(R.drawable.lucide_ic_chevron_right, null, Modifier.size(19.dp), c.muted)
+                    }
+                }
+            }
+        }
+        item {
+            Column {
+                SectionHeader("Conexões")
+                Spacer(Modifier.height(7.dp))
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface).padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    LIcon(R.drawable.lucide_ic_cloud, null, Modifier.size(22.dp), c.accent)
+                    Spacer(Modifier.width(13.dp))
+                    Column {
+                        Text("Integração com Psiu", fontWeight = FontWeight.SemiBold, color = c.text)
+                        Text("Planejada para uma versão futura", color = c.muted, fontSize = 12.sp)
+                    }
+                }
             }
         }
     }
 }
 
-/** Shared result section, so all screens use the same consistent song rows. */
-private fun androidx.compose.foundation.lazy.LazyListScope.catalogItems(
-    songs: List<Song>, favorites: List<Song>, isLoading: Boolean, error: String?,
-    onRetry: () -> Unit, onOpen: (Song) -> Unit, onToggle: (Song) -> Unit,
-) {
-    if (isLoading) {
-        item {
-            Row(Modifier.fillMaxWidth().padding(26.dp), horizontalArrangement = Arrangement.Center) {
-                CircularProgressIndicator(color = Lime, strokeWidth = 3.dp, modifier = Modifier.size(25.dp))
-                Spacer(Modifier.width(16.dp))
-                Text("Buscando faixas…", color = Muted)
-            }
-        }
-    } else if (error != null) {
-        item { ErrorState(error, onRetry) }
-    } else {
-        items(songs, key = { it.videoId }) { song ->
-            SongRow(
-                song = song,
-                isFavorite = favorites.any { it.videoId == song.videoId },
-                onOpen = { onOpen(song) },
-                onFavorite = { onToggle(song) },
-            )
-        }
+@Composable
+private fun ProfileStat(value: String, caption: String) {
+    val c = ocarinaColors
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = c.text)
+        Text(caption, fontSize = 11.sp, color = c.muted)
     }
 }
 
 @Composable
 private fun SongRow(song: Song, isFavorite: Boolean, onOpen: () -> Unit, onFavorite: () -> Unit) {
+    val c = ocarinaColors
     Row(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
-            .clickable(onClick = onOpen).padding(vertical = 7.dp, horizontal = 5.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onOpen).padding(vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(60.dp).clip(RoundedCornerShape(13.dp)).background(Raised)) {
-            AsyncImage(
-                model = song.artwork,
-                contentDescription = "Capa de ${song.title}",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        Spacer(Modifier.width(13.dp))
+        AsyncImage(model = song.artwork, contentDescription = song.title, contentScale = ContentScale.Crop,
+            modifier = Modifier.size(57.dp).clip(RoundedCornerShape(13.dp)).background(c.artworkSurface))
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                color = WarmWhite, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(song.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(3.dp))
-            Text(song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                color = Muted, fontSize = 12.sp)
+            Text(song.artist, color = c.muted, fontSize = 12.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        IconButton(onClick = onFavorite, modifier = Modifier.size(42.dp)) {
-            Icon(
-                if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                contentDescription = if (isFavorite) "Remover dos favoritos" else "Adicionar aos favoritos",
-                tint = if (isFavorite) Lime else Muted,
-                modifier = Modifier.size(21.dp),
-            )
+        IconButton(onClick = onFavorite, modifier = Modifier.size(41.dp)) {
+            LIcon(R.drawable.lucide_ic_heart,
+                if (isFavorite) "Remover dos favoritos" else "Adicionar aos favoritos",
+                Modifier.size(20.dp), if (isFavorite) c.accent else c.muted)
         }
-        Icon(Icons.Rounded.PlayArrow, contentDescription = "Abrir player", tint = Lime, modifier = Modifier.size(21.dp))
+        LIcon(R.drawable.lucide_ic_play, "Tocar", Modifier.size(20.dp), c.accent)
         Spacer(Modifier.width(4.dp))
     }
 }
 
 @Composable
-private fun EmptyState(title: String, subtitle: String) {
+private fun EmptyPanel(title: String, message: String, @DrawableRes icon: Int, onClick: (() -> Unit)? = null, label: String = "") {
+    val c = ocarinaColors
     Column(
-        Modifier.fillMaxWidth().padding(vertical = 48.dp, horizontal = 18.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(c.surface).padding(25.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(Icons.Rounded.MusicNote, null, tint = Lime, modifier = Modifier.size(44.dp))
-        Spacer(Modifier.height(15.dp))
-        Text(title, textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold, color = WarmWhite)
+        LIcon(icon, null, Modifier.size(32.dp), c.accent)
+        Spacer(Modifier.height(11.dp))
+        Text(title, color = c.text, fontWeight = FontWeight.Bold, fontSize = 15.sp, textAlign = TextAlign.Center)
         Spacer(Modifier.height(5.dp))
-        Text(subtitle, textAlign = TextAlign.Center, color = Muted, fontSize = 12.sp)
+        Text(message, color = c.muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+        if (onClick != null) {
+            Spacer(Modifier.height(13.dp))
+            TextButton(onClick = onClick) { Text(label, color = c.accent) }
+        }
     }
 }
 
 @Composable
-private fun ErrorState(message: String, onRetry: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
-            .background(Card).padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("Não conseguimos carregar agora", fontWeight = FontWeight.Bold, color = WarmWhite)
-        Spacer(Modifier.height(9.dp))
-        Text(message, color = Muted, textAlign = TextAlign.Center, fontSize = 12.sp)
-        Spacer(Modifier.height(14.dp))
+private fun ErrorPanel(message: String, onRetry: () -> Unit) {
+    val c = ocarinaColors
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface).padding(20.dp)) {
+        Text("Não conseguimos carregar", color = c.text, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(5.dp))
+        Text(message, color = c.muted, fontSize = 12.sp)
         TextButton(onClick = onRetry) {
-            Icon(Icons.Rounded.Refresh, null, tint = Lime)
-            Spacer(Modifier.width(5.dp))
-            Text("Tentar novamente", color = Lime)
+            LIcon(R.drawable.lucide_ic_refresh_cw, null, Modifier.size(16.dp), c.accent)
+            Spacer(Modifier.width(8.dp))
+            Text("Tentar novamente", color = c.accent)
         }
     }
 }
 
-
-/** Barra compacta de áudio, sempre visível acima da navegação como no Spotify. */
 @Composable
-private fun MiniPlayer(song: Song, playback: PlaybackConnector, onExpand: () -> Unit, onNext: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp)
-            .clip(RoundedCornerShape(15.dp)).background(Raised)
-            .clickable(onClick = onExpand).padding(horizontal = 10.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        AsyncImage(model = song.artwork, contentDescription = null, contentScale = ContentScale.Crop,
-            modifier = Modifier.size(45.dp).clip(RoundedCornerShape(9.dp)))
-        Spacer(Modifier.width(11.dp))
-        Column(Modifier.weight(1f)) {
-            Text(song.title, color = WarmWhite, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
-            Text(if (playback.resolvingAudio) "Preparando áudio…" else song.artist, color = Muted, fontSize = 11.sp, maxLines = 1)
-        }
-        IconButton(onClick = { playback.toggle() }, enabled = !playback.resolvingAudio) {
-            if (playback.resolvingAudio || playback.buffering) {
-                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Lime)
-            } else Icon(if (playback.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, "Play/Pause", tint = WarmWhite)
-        }
-        IconButton(onClick = onNext) { Icon(Icons.Rounded.SkipNext, "Próxima", tint = WarmWhite) }
+private fun LoadingRow() {
+    val c = ocarinaColors
+    Row(Modifier.fillMaxWidth().padding(19.dp), horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(modifier = Modifier.size(23.dp), color = c.accent, strokeWidth = 2.dp)
+        Spacer(Modifier.width(12.dp))
+        Text("Carregando músicas...", color = c.muted, fontSize = 12.sp)
     }
-    if (playback.error != null) {
-        Text(playback.error.orEmpty(), modifier = Modifier.padding(horizontal = 16.dp, vertical = 3.dp), color = Color(0xFFF6AB9D), fontSize = 11.sp, maxLines = 2)
+}
+
+@Composable
+private fun MiniPlayer(song: Song, playback: PlaybackConnector, onExpand: () -> Unit) {
+    val c = ocarinaColors
+    Column(Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 3.dp)
+        .clip(RoundedCornerShape(16.dp)).background(c.elevated)) {
+        Row(Modifier.fillMaxWidth().clickable(onClick = onExpand).padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            AsyncImage(model = song.artwork, contentDescription = null, contentScale = ContentScale.Crop,
+                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(9.dp)))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis, color = c.text, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(if (playback.resolvingAudio) "Preparando áudio..." else song.artist,
+                    color = c.muted, fontSize = 11.sp, maxLines = 1)
+            }
+            IconButton(onClick = { playback.toggle() }, enabled = !playback.resolvingAudio) {
+                if (playback.resolvingAudio || playback.buffering) {
+                    CircularProgressIndicator(Modifier.size(19.dp), color = c.accent, strokeWidth = 2.dp)
+                } else LIcon(if (playback.playing) R.drawable.lucide_ic_pause else R.drawable.lucide_ic_play,
+                    "Tocar ou pausar", Modifier.size(23.dp))
+            }
+        }
+        if (playback.durationMs > 0) {
+            LinearProgressIndicator(
+                progress = { (playback.positionMs.toFloat() / playback.durationMs).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(2.dp),
+                color = c.accent, trackColor = c.outline,
+            )
+        }
+        if (playback.error != null) Text(playback.error.orEmpty(), color = c.accent,
+            fontSize = 10.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp), maxLines = 2)
     }
 }
 
@@ -519,84 +743,86 @@ private fun NativePlayerScreen(
     onClose: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit,
 ) {
     val song = playback.currentSong ?: return
+    val c = ocarinaColors
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
-            Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF344737), Ink, Ink)))
-                .statusBarsPadding().navigationBarsPadding().padding(horizontal = 27.dp, vertical = 20.dp),
+            Modifier.fillMaxSize().background(c.background).statusBarsPadding().navigationBarsPadding()
+                .padding(horizontal = 26.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onClose) { Icon(Icons.Rounded.ArrowBack, "Minimizar", tint = WarmWhite) }
+                IconButton(onClick = onClose) { LIcon(R.drawable.lucide_ic_chevron_down, "Minimizar", Modifier.size(28.dp)) }
                 Spacer(Modifier.weight(1f))
-                Text("OCARINA MUSIC", color = WarmWhite, fontWeight = FontWeight.Bold, fontSize = 12.sp, letterSpacing = 1.sp)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("TOCANDO AGORA", color = c.muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text("Ocarina", color = c.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
                 Spacer(Modifier.weight(1f))
-                Spacer(Modifier.width(48.dp))
+                IconButton(onClick = onClose) { LIcon(R.drawable.lucide_ic_ellipsis, "Minimizar", Modifier.size(22.dp)) }
             }
-            Spacer(Modifier.weight(0.6f))
-            AsyncImage(model = song.artwork, contentDescription = "Capa de ${song.title}", contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxWidth().aspectRatio(1f).shadow(18.dp, RoundedCornerShape(16.dp))
-                    .clip(RoundedCornerShape(16.dp)).background(Raised))
-            Spacer(Modifier.weight(0.7f))
+            Spacer(Modifier.weight(0.5f))
+            BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                val coverSize = minOf(maxWidth, 365.dp)
+                AsyncImage(model = song.artwork, contentDescription = "Capa de ${song.title}",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(coverSize).shadow(15.dp, RoundedCornerShape(23.dp))
+                        .clip(RoundedCornerShape(23.dp)).background(c.artworkSurface))
+            }
+            Spacer(Modifier.weight(0.65f))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(song.title, color = WarmWhite, fontSize = 24.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(4.dp))
-                    Text(song.artist, color = Muted, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(song.title, fontSize = 25.sp, lineHeight = 28.sp, color = c.text,
+                        fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(5.dp))
+                    Text(song.artist, color = c.muted, fontSize = 15.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 IconButton(onClick = onFavorite) {
-                    Icon(if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        "Curtir", tint = if (isFavorite) Lime else WarmWhite)
+                    LIcon(R.drawable.lucide_ic_heart, "Curtir música", Modifier.size(27.dp),
+                        if (isFavorite) c.accent else c.text)
                 }
             }
-            Spacer(Modifier.height(17.dp))
             if (playback.error != null) {
-                Text(playback.error.orEmpty(), color = Color(0xFFF6AB9D), fontSize = 13.sp,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp))
+                Spacer(Modifier.height(8.dp))
+                Text(playback.error.orEmpty(), color = c.accent, fontSize = 12.sp)
             }
-            val maxMs = playback.durationMs.coerceAtLeast(1L)
+            Spacer(Modifier.height(14.dp))
+            val duration = playback.durationMs.coerceAtLeast(1L)
             var dragging by remember(song.videoId) { mutableStateOf<Float?>(null) }
             Slider(
-                value = dragging ?: (playback.positionMs.toFloat() / maxMs).coerceIn(0f, 1f),
+                value = dragging ?: (playback.positionMs.toFloat() / duration).coerceIn(0f, 1f),
                 onValueChange = { dragging = it },
-                onValueChangeFinished = {
-                    dragging?.let { playback.seekTo((it * maxMs).toLong()) }
-                    dragging = null
-                },
-                colors = SliderDefaults.colors(thumbColor = WarmWhite, activeTrackColor = Lime, inactiveTrackColor = Raised),
+                onValueChangeFinished = { dragging?.let { playback.seekTo((it * duration).toLong()) }; dragging = null },
                 enabled = playback.durationMs > 0,
+                colors = SliderDefaults.colors(thumbColor = c.accent, activeTrackColor = c.accent,
+                    inactiveTrackColor = c.outline),
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(formatTime(playback.positionMs), color = Muted, fontSize = 11.sp)
-                Text(formatTime(playback.durationMs), color = Muted, fontSize = 11.sp)
+                Text(formatTime(playback.positionMs), color = c.muted, fontSize = 11.sp)
+                Text(formatTime(playback.durationMs), color = c.muted, fontSize = 11.sp)
             }
-            Spacer(Modifier.height(13.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onPrevious) {
-                    Icon(Icons.Rounded.SkipPrevious, "Anterior", tint = WarmWhite, modifier = Modifier.size(35.dp))
-                }
-                FilledIconButton(
-                    onClick = { playback.toggle() },
-                    modifier = Modifier.size(74.dp),
+            Spacer(Modifier.height(17.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onPrevious) { LIcon(R.drawable.lucide_ic_skip_back, "Anterior", Modifier.size(28.dp)) }
+                FilledIconButton(onClick = { playback.toggle() }, modifier = Modifier.size(73.dp),
                     enabled = !playback.resolvingAudio,
-                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = Lime, contentColor = Ink),
-                ) {
-                    if (playback.resolvingAudio || playback.buffering) CircularProgressIndicator(Modifier.size(27.dp), color = Ink, strokeWidth = 3.dp)
-                    else Icon(if (playback.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        if (playback.playing) "Pausar" else "Tocar", modifier = Modifier.size(38.dp))
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = c.accent, contentColor = c.onAccent)) {
+                    if (playback.resolvingAudio || playback.buffering) CircularProgressIndicator(
+                        Modifier.size(26.dp), strokeWidth = 2.dp, color = c.onAccent)
+                    else LIcon(if (playback.playing) R.drawable.lucide_ic_pause else R.drawable.lucide_ic_play,
+                        "Tocar ou pausar", Modifier.size(32.dp), c.onAccent)
                 }
-                IconButton(onClick = onNext) {
-                    Icon(Icons.Rounded.SkipNext, "Próxima", tint = WarmWhite, modifier = Modifier.size(35.dp))
-                }
+                IconButton(onClick = onNext) { LIcon(R.drawable.lucide_ic_skip_forward, "Próxima", Modifier.size(28.dp)) }
             }
-            Spacer(Modifier.weight(0.45f))
-            Text(
-                if (playback.sourceBitrateKbps > 0)
-                    "Áudio original · ${playback.sourceBitrateKbps} kbps estimados pela fonte"
-                else "Áudio original · qualidade conforme a fonte",
-                color = Muted, fontSize = 11.sp,
-            )
+            Spacer(Modifier.weight(0.35f))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                LIcon(R.drawable.lucide_ic_audio_lines, null, Modifier.size(21.dp), c.muted)
+                Text(if (playback.sourceBitrateKbps > 0) "Áudio original: ${playback.sourceBitrateKbps} kbps (estimado)"
+                    else "Áudio original da fonte", color = c.muted, fontSize = 11.sp)
+                LIcon(R.drawable.lucide_ic_list_music, null, Modifier.size(21.dp), c.muted)
+            }
         }
     }
 }

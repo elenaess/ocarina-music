@@ -5,3 +5,6 @@
 - Kotlin, Jetpack Compose, OkHttp e Coil — suas respectivas licenças permissivas.
 
 O código original do protótipo Ocarina permanece sob a licença MIT original. O uso do NewPipe Extractor, porém, torna a distribuição do aplicativo combinado sujeita à GPL. O projeto não é afiliado ao YouTube nem ao Spotify.
+
+- Lucide Icons (via Compose Icons `com.composables:icons-lucide-android`) — MIT; os ícones da UI são recursos Lucide, não caracteres Unicode. Fonte: https://github.com/composablehorizons/compose-icons.
+- Marca Ocarina — arte vetorizada a partir da imagem de referência fornecida pela proprietária do projeto. Veja `branding/ocarina-mark.svg`.

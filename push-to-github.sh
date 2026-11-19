@@ -12,6 +12,6 @@ git clone --branch main --single-branch "$REPO" "$WORKDIR/ocarina-music"
 cd "$WORKDIR/ocarina-music"
 git add -A
 if git diff --cached --quiet; then echo 'Sem mudanças novas.'; exit 0; fi
-git -c user.name='elenaess' -c user.email='289515223+elenaess@users.noreply.github.com' commit -m 'perf: native audio buffering and quality (v0.2.1)'
+git -c user.name='elenaess' -c user.email='289515223+elenaess@users.noreply.github.com' commit -m 'feat: Ocarina visual redesign, light dark themes and profile (v0.3.0)'
 git push origin main
 echo 'Pronto: https://github.com/elenaess/ocarina-music/actions'
