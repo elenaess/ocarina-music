@@ -64,7 +64,7 @@ class PlaybackConnector(context: Context) {
             Log.e("OcarinaPlayback", "Falha Media3 na faixa ${currentSong?.videoId}", error)
             // Expiring temporary URLs occasionally return 403. Retry the current track once.
             if (!retryingSource && currentSong != null &&
-                player.currentMediaItem?.mediaId == currentSong?.videoId &&
+                controller?.currentMediaItem?.mediaId == currentSong?.videoId &&
                 (error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
                     error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED)) {
                 retryingSource = true
