@@ -16,6 +16,16 @@ data class OcarinaPublicProfile(
 class OcarinaDirectory {
     private val profiles = FirebaseFirestore.getInstance().collection("public_profiles")
 
+    suspend fun lookup(uid: String): OcarinaPublicProfile? {
+        if (!uid.matches(Regex("[A-Za-z0-9_-]{8,128}"))) return null
+        val doc = profiles.document(uid).get().await()
+        if (!doc.exists()) return null
+        val name = doc.getString("displayName").orEmpty()
+        if (name.isBlank()) return null
+        return OcarinaPublicProfile(uid, name, doc.getString("bio").orEmpty(),
+            doc.getString("photoUrl").orEmpty(), doc.getString("avatarBase64").orEmpty())
+    }
+
     suspend fun search(query: String): List<OcarinaPublicProfile> {
         val key = query.trim().lowercase(Locale.ROOT).take(50)
         if (key.length < 2) return emptyList()

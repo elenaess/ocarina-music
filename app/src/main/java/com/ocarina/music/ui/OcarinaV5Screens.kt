@@ -88,107 +88,78 @@ fun OcarinaV5Login(account: OcarinaAccount) {
     var showPassword by remember { mutableStateOf(false) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    // Present choices first; keep credentials out of sight until the user chooses e-mail.
-    LazyColumn(
-        Modifier.fillMaxSize().background(c.background).statusBarsPadding().navigationBarsPadding(),
-        contentPadding = PaddingValues(horizontal = 25.dp, vertical = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    androidx.activity.compose.BackHandler(emailMode) { emailMode = false; account.clearMessage() }
+    Column(Modifier.fillMaxSize().background(c.background).statusBarsPadding()
+        .navigationBarsPadding().padding(horizontal = 27.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        item {
-            Spacer(Modifier.height(46.dp))
-            Box(Modifier.size(68.dp).clip(RoundedCornerShape(22.dp)).background(c.softAccent),
-                contentAlignment = Alignment.Center) {
-                VI(R.drawable.ocarina_logo, "Ocarina", Modifier.size(39.dp), c.accent)
-            }
-            Spacer(Modifier.height(24.dp))
-            Text("Seu som. Seu mundo.", modifier = Modifier.fillMaxWidth(),
-                color = c.text, fontSize = 31.sp, lineHeight = 35.sp,
-                fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp)
-            Spacer(Modifier.height(5.dp))
-            Text("Ouça, descubra e guarde suas músicas.",
-                modifier = Modifier.fillMaxWidth(), color = c.muted, fontSize = 14.sp)
-            Spacer(Modifier.height(34.dp))
-            OutlinedButton(
-                onClick = { activity?.let(account::signInWithGoogle) },
+        verticalArrangement = Arrangement.Center) {
+        if (!emailMode) {
+            // Intentional simplicity: no icon tile, headline, caption or input box on the entry view.
+            VI(R.drawable.ocarina_logo, "Ocarina", Modifier.size(104.dp), c.accent)
+            Spacer(Modifier.height(52.dp))
+            Button(onClick = { activity?.let(account::signInWithGoogle) },
                 enabled = activity != null && !account.busy,
-                modifier = Modifier.fillMaxWidth().height(54.dp),
+                modifier = Modifier.fillMaxWidth().height(55.dp),
                 shape = RoundedCornerShape(28.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, c.outline),
-                colors = ButtonDefaults.outlinedButtonColors(containerColor = c.surface, contentColor = c.text),
-            ) {
-                Image(painterResource(R.drawable.google_g), null, Modifier.size(21.dp))
+                colors = ButtonDefaults.buttonColors(containerColor = c.accent, contentColor = c.onAccent)) {
+                Image(painterResource(R.drawable.google_g), null, Modifier.size(23.dp))
                 Spacer(Modifier.width(12.dp))
-                Text("Continuar com Google", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text("Continuar com Google", fontWeight = FontWeight.SemiBold)
             }
-            Spacer(Modifier.height(10.dp))
-            OutlinedButton(
-                onClick = { emailMode = !emailMode; account.clearMessage() },
-                modifier = Modifier.fillMaxWidth().height(54.dp),
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(onClick = { emailMode = true; account.clearMessage() },
+                modifier = Modifier.fillMaxWidth().height(55.dp),
                 shape = RoundedCornerShape(28.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, c.outline),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = c.text),
-            ) {
-                VI(LucideR.drawable.lucide_ic_user_round, null, Modifier.size(21.dp), c.accent)
+                border = androidx.compose.foundation.BorderStroke(1.dp, c.outline)) {
+                VI(R.drawable.ocarina_mail, null, Modifier.size(20.dp), c.text)
                 Spacer(Modifier.width(12.dp))
-                Text(if (emailMode) "Fechar e-mail" else "Continuar com e-mail",
-                    fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text("Continuar com e-mail", fontWeight = FontWeight.SemiBold)
             }
-        }
-        if (emailMode) {
-            item {
-                Spacer(Modifier.height(12.dp))
-                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-                    .background(c.surface).padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(11.dp)) {
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
-                        .background(c.elevated).padding(4.dp)) {
-                        listOf(false to "Entrar", true to "Criar conta").forEach { (value, label) ->
-                            val chosen = register == value
-                            Box(Modifier.weight(1f).height(40.dp)
-                                .clip(RoundedCornerShape(15.dp))
-                                .background(if (chosen) c.accent else Color.Transparent)
-                                .clickable { register = value; account.clearMessage() },
-                                contentAlignment = Alignment.Center) {
-                                Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                                    color = if (chosen) c.onAccent else c.text)
-                            }
-                        }
-                    }
-                    OutlinedTextField(email, onValueChange = { email = it.take(200) },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                        label = { Text("E-mail") }, shape = RoundedCornerShape(14.dp))
-                    OutlinedTextField(password, onValueChange = { password = it },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                        visualTransformation = if (showPassword) VisualTransformation.None
-                            else PasswordVisualTransformation(),
-                        trailingIcon = {
-                            TextButton(onClick = { showPassword = !showPassword }) {
-                                Text(if (showPassword) "Ocultar" else "Mostrar", fontSize = 11.sp)
-                            }
-                        }, label = { Text("Senha") }, shape = RoundedCornerShape(14.dp))
-                    Button(onClick = { if (register) account.register(email, password)
-                        else account.signIn(email, password) },
-                        enabled = !account.busy && email.isNotBlank() && password.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth().height(49.dp),
-                        shape = RoundedCornerShape(25.dp)) {
-                        Text(if (register) "Criar minha conta" else "Entrar", fontWeight = FontWeight.Bold)
-                    }
-                    if (!register) TextButton(onClick = { account.resetPassword(email) },
-                        enabled = email.isNotBlank() && !account.busy,
-                        modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                        Text("Esqueci minha senha", color = c.accent, fontSize = 12.sp)
-                    }
+        } else {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { emailMode = false; account.clearMessage() }) {
+                    VI(LucideR.drawable.lucide_ic_arrow_left, "Voltar", Modifier.size(24.dp))
                 }
+                Spacer(Modifier.width(9.dp))
+                Text(if (register) "Criar conta" else "Entrar", color = c.text,
+                    fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.height(23.dp))
+            OutlinedTextField(email, { email = it.take(200) },
+                modifier = Modifier.fillMaxWidth(), label = { Text("E-mail") },
+                singleLine = true, shape = RoundedCornerShape(14.dp))
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(password, { password = it },
+                modifier = Modifier.fillMaxWidth(), label = { Text("Senha") },
+                singleLine = true, shape = RoundedCornerShape(14.dp),
+                visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    TextButton(onClick = { showPassword = !showPassword }) {
+                        Text(if (showPassword) "Ocultar" else "Mostrar", fontSize = 11.sp)
+                    }
+                })
+            Spacer(Modifier.height(20.dp))
+            Button(onClick = { if (register) account.register(email, password) else account.signIn(email, password) },
+                enabled = !account.busy && email.isNotBlank() && password.isNotBlank(),
+                modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(26.dp)) {
+                Text(if (register) "Criar conta" else "Entrar", fontWeight = FontWeight.SemiBold)
+            }
+            TextButton(onClick = { register = !register; account.clearMessage() }) {
+                Text(if (register) "Já tenho uma conta" else "Criar conta com e-mail", color = c.accent)
+            }
+            if (!register) TextButton(onClick = { account.resetPassword(email) },
+                enabled = !account.busy && email.isNotBlank()) {
+                Text("Esqueci minha senha", color = c.muted)
             }
         }
-        item {
-            if (account.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = c.accent)
-            account.message?.let { Text(it, color = c.accent, fontSize = 12.sp) }
-            Spacer(Modifier.height(20.dp))
-            Text("Seu perfil e suas curtidas permanecem privados por padrão.",
-                modifier = Modifier.fillMaxWidth(), color = c.muted, fontSize = 11.sp,
-                lineHeight = 17.sp)
+        if (account.busy) {
+            Spacer(Modifier.height(16.dp))
+            LinearProgressIndicator(Modifier.fillMaxWidth(), color = c.accent)
+        }
+        account.message?.let {
+            Spacer(Modifier.height(11.dp))
+            Text(it, color = c.accent, fontSize = 12.sp)
         }
     }
 }
@@ -200,38 +171,40 @@ fun OcarinaV5Header(screen: String, account: OcarinaAccount,
     val c = ocarinaColors
     val main = screen in setOf("HOME", "SEARCH", "LIBRARY", "PROFILE")
     Row(Modifier.fillMaxWidth().background(c.background).statusBarsPadding()
-        .padding(start = 17.dp, end = 13.dp, top = 10.dp, bottom = 9.dp),
+        .height(60.dp).padding(horizontal = 17.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        if (!main) IconButton(onClick = onBack, modifier = Modifier.size(35.dp)) {
-            VI(LucideR.drawable.lucide_ic_arrow_left, "Voltar", Modifier.size(23.dp))
-        }
-        VI(R.drawable.ocarina_logo, "Ocarina", Modifier.size(36.dp), c.accent)
-        // The profile page already displays a large avatar; do not duplicate it in the header.
-        if (screen != "PROFILE" && screen != "PROFILE_EDIT") {
-            Spacer(Modifier.width(10.dp))
-            Box(Modifier.clip(CircleShape).clickable(onClick = onProfile)) {
-                OcarinaV5Avatar(account.avatarBase64, account.user?.photoUrl?.toString(), 35.dp)
+        if (!main) {
+            // Secondary screens only need a back arrow. No logo, avatar or header label.
+            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                VI(LucideR.drawable.lucide_ic_arrow_left, "Voltar", Modifier.size(23.dp))
+            }
+        } else {
+            VI(R.drawable.ocarina_logo, "Ocarina", Modifier.size(36.dp), c.accent)
+            if (screen != "PROFILE") {
+                Spacer(Modifier.width(11.dp))
+                Box(Modifier.clip(CircleShape).clickable(onClick = onProfile)) {
+                    OcarinaV5Avatar(account.avatarBase64, account.user?.photoUrl?.toString(), 35.dp)
+                }
             }
         }
-        Spacer(Modifier.width(12.dp))
-        val title = when (screen) {
-            "PROFILE_EDIT" -> "Editar perfil"
-            "PUBLIC_PROFILE" -> "Perfil público"
-            "PLAYLISTS", "PLAYLIST_DETAIL" -> "Playlists"
-            "ARTISTS" -> "Artistas"
-            "ALBUMS" -> "Álbuns"
-            "DOWNLOADS" -> "Downloads"
-            else -> ""
-        }
-        if (title.isNotBlank()) Text(title, color = c.text, fontWeight = FontWeight.Bold,
-            fontSize = if (title.length > 14) 17.sp else 20.sp,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.weight(1f))
-        if (screen == "LIBRARY") {
-            IconButton(onClick = onSearch) { VI(LucideR.drawable.lucide_ic_search, "Buscar", Modifier.size(22.dp)) }
-            IconButton(onClick = onCreate) { VI(LucideR.drawable.lucide_ic_plus, "Criar playlist", Modifier.size(24.dp)) }
-        } else if (screen == "HOME" || screen == "PROFILE") {
-            IconButton(onClick = onSearch) { VI(LucideR.drawable.lucide_ic_search, "Buscar", Modifier.size(24.dp)) }
+        when (screen) {
+            "LIBRARY" -> {
+                IconButton(onClick = onSearch) {
+                    VI(LucideR.drawable.lucide_ic_search, "Buscar", Modifier.size(22.dp))
+                }
+                IconButton(onClick = onCreate) {
+                    VI(LucideR.drawable.lucide_ic_plus, "Criar playlist", Modifier.size(24.dp))
+                }
+            }
+            "SEARCH" -> {
+                // Icon is displayed for visual consistency; camera search is not enabled yet.
+                VI(R.drawable.ocarina_camera, null, Modifier.size(24.dp), c.text)
+                Spacer(Modifier.width(11.dp))
+            }
+            "HOME", "PROFILE" -> IconButton(onClick = onSearch) {
+                VI(LucideR.drawable.lucide_ic_search, "Buscar", Modifier.size(24.dp))
+            }
         }
     }
 }
@@ -324,8 +297,7 @@ private fun V5SongRow(song: Song, liked: Boolean, onPlay: () -> Unit,
                 color = c.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         IconButton(onClick = onLike, modifier = Modifier.size(41.dp)) {
-            VI(LucideR.drawable.lucide_ic_heart, "Curtir", Modifier.size(20.dp),
-                if (liked) c.accent else c.muted)
+            OcarinaHeart(liked = liked, size = 20.dp)
         }
         Box {
             IconButton(onClick = { menu = true }, modifier = Modifier.size(39.dp)) {

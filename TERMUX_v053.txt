@@ -1,0 +1,38 @@
+OCARINA v0.5.3 — TERMUX
+
+1. No Android, mova o ZIP para Armazenamento interno / Download.
+   NÃO use somente a aba geral Downloads (ela pode exibir locais privados).
+2. Cole todo o bloco abaixo no Termux.
+3. Após o push, abra https://github.com/elenaess/ocarina-music/actions
+
+-----
+bash <<'SH'
+set -e
+pkg install -y git gh unzip tar findutils
+termux-setup-storage >/dev/null 2>&1 || true
+ZIP=$(find "$HOME/storage/shared/Download" /sdcard/Download "$HOME/storage/shared/Documents" \
+  -maxdepth 2 -type f -iname '*Ocarina*v0.5.3*.zip' -print -quit 2>/dev/null | head -n 1)
+if [ -z "$ZIP" ]; then
+  echo 'ERRO: ZIP não está na pasta Download física. Mova-o usando o app Arquivos.'
+  exit 1
+fi
+echo "Encontrado: $ZIP"
+unzip -tq "$ZIP"
+DIR=$(mktemp -d)
+unzip -oq "$ZIP" -d "$DIR"
+PROJECT="$DIR/ocarina-music"
+test -f "$PROJECT/push-to-github.sh" || { echo 'ZIP sem projeto'; exit 1; }
+grep 'versionName' "$PROJECT/app/build.gradle.kts"
+gh auth status || gh auth login
+bash "$PROJECT/push-to-github.sh"
+echo "Pronto! GitHub Actions: https://github.com/elenaess/ocarina-music/actions"
+echo "Arquivos do Pages: $PROJECT/website"
+echo "Para gerar associação do domínio:"
+echo "bash $PROJECT/setup-ocarina-pages-termux.sh"
+SH
+-----
+
+Para publicar links elena.services, atualize firestore.rules no Console Firebase
+e depois publique o conteúdo da pasta website/ no seu repositório GitHub Pages.
+Rode o script setup-ocarina-pages-termux.sh antes de publicar para criar
+o website/.well-known/assetlinks.json com o SHA-256 da assinatura do APK.

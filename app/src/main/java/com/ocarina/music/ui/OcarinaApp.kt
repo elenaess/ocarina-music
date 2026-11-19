@@ -55,6 +55,8 @@ import com.ocarina.music.R
 import com.composables.icons.lucide.R as LucideR
 import com.ocarina.music.data.CatalogEntry
 import com.ocarina.music.data.CatalogKind
+import com.ocarina.music.OcarinaDeepLink
+import com.ocarina.music.data.OcarinaLinks
 import com.ocarina.music.data.OcarinaDirectory
 import com.ocarina.music.data.OcarinaPublicProfile
 import com.ocarina.music.data.OcarinaOfflineStore
@@ -75,7 +77,7 @@ import java.util.Locale
 
 private enum class Screen {
     HOME, SEARCH, LIBRARY, LIKED, PROFILE, PLAYLISTS, PLAYLIST_DETAIL,
-    ARTISTS, ALBUMS, CATALOG_DETAIL, DOWNLOADS, PROFILE_EDIT, PUBLIC_PROFILE
+    ARTISTS, ALBUMS, CATALOG_DETAIL, DOWNLOADS, PROFILE_EDIT, PUBLIC_PROFILE, PUBLIC_PLAYLIST
 }
 
 /** Every interface icon is a Lucide vector resource. The brand mark is its own vector. */
@@ -124,6 +126,7 @@ fun OcarinaApp() {
         var publicProfiles by remember { mutableStateOf<List<OcarinaPublicProfile>>(emptyList()) }
         var profileSearchLoading by remember { mutableStateOf(false) }
         var selectedPublicProfile by remember { mutableStateOf<OcarinaPublicProfile?>(null) }
+        var sharedPlaylist by remember { mutableStateOf<OcarinaPlaylist?>(null) }
         var discoveryLoading by remember { mutableStateOf(true) }
         var searchLoading by remember { mutableStateOf(false) }
         var discoverError by remember { mutableStateOf<String?>(null) }
@@ -196,16 +199,24 @@ fun OcarinaApp() {
             }
             runCatching { context.startActivity(Intent.createChooser(intent, title)) }
         }
-        fun songLink(song: Song): String = if (song.videoId.matches(Regex("[A-Za-z0-9_-]{11}")))
-            "https://music.youtube.com/watch?v=${song.videoId}" else "Áudio pessoal no Ocarina"
         fun shareSong(song: Song) {
-            shareText("Compartilhar música", "${song.title} — ${song.artist}\n${songLink(song)}")
+            val link = OcarinaLinks.track(song)
+            if (link == null) {
+                Toast.makeText(context, "Áudio local não possui link compartilhável.", Toast.LENGTH_SHORT).show()
+                return
+            }
+            shareText("Compartilhar música", "${song.title} — ${song.artist}\n$link")
         }
         fun sharePlaylist(list: OcarinaPlaylist) {
-            val songsList = list.songs.take(50).mapIndexed { i, song ->
-                "${i + 1}. ${song.title} — ${song.artist}\n${songLink(song)}"
-            }.joinToString("\n")
-            shareText("Compartilhar playlist", "Playlist ${list.name} • Ocarina\n\n$songsList")
+            val uid = account.user?.uid ?: return
+            coroutineScope.launch {
+                try {
+                    OcarinaLinks.publishPlaylist(uid, list)
+                    shareText("Compartilhar playlist", "${list.name} • Ocarina\n${OcarinaLinks.playlist(uid, list.id)}")
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Não foi possível publicar a playlist: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                }
+            }
         }
         fun openCatalog(kind: CatalogKind) {
             catalogQuery = ""
@@ -232,7 +243,7 @@ fun OcarinaApp() {
                 screen == Screen.PLAYLISTS || screen == Screen.ARTISTS ||
                     screen == Screen.ALBUMS || screen == Screen.DOWNLOADS -> screen = Screen.LIBRARY
                 screen == Screen.PROFILE_EDIT -> screen = Screen.PROFILE
-                screen == Screen.PUBLIC_PROFILE -> screen = Screen.SEARCH
+                screen == Screen.PUBLIC_PROFILE || screen == Screen.PUBLIC_PLAYLIST -> screen = Screen.HOME
                 screen == Screen.SEARCH && searchText.isNotBlank() -> searchText = ""
                 screen == Screen.PROFILE -> screen = previousScreen
                 screen != Screen.HOME -> screen = Screen.HOME
@@ -311,6 +322,49 @@ fun OcarinaApp() {
             queue.getOrNull(i - 1)?.let { playback.play(it, queue.getOrNull(i)) }
         }
 
+        // Handle external Ocarina links only after Google / email authentication is complete.
+        LaunchedEffect(account.user?.uid, OcarinaDeepLink.pending) {
+            val uri = OcarinaDeepLink.pending ?: return@LaunchedEffect
+            if (account.user == null) return@LaunchedEffect
+            val parts = uri.pathSegments
+            try {
+                if (parts.size >= 3 && parts[0] == "ocarina") {
+                    when (parts[1]) {
+                        "track" -> {
+                            val id = parts[2]
+                            if (id.matches(Regex("[A-Za-z0-9_-]{11}"))) {
+                                val title = uri.getQueryParameter("title")?.take(150).orEmpty()
+                                val artist = uri.getQueryParameter("artist")?.take(100).orEmpty()
+                                val artwork = uri.getQueryParameter("artwork")?.take(800)
+                                    ?.takeIf { it.startsWith("https://") }
+                                    ?: "https://i.ytimg.com/vi/$id/hqdefault.jpg"
+                                val song = Song(id, title.ifBlank { "Música compartilhada" },
+                                    artist.ifBlank { "Ocarina" }, artwork)
+                                playSong(song, listOf(song))
+                            }
+                        }
+                        "profile" -> {
+                            val profile = directory.lookup(parts[2])
+                            if (profile != null) {
+                                selectedPublicProfile = profile
+                                screen = Screen.PUBLIC_PROFILE
+                            } else Toast.makeText(context, "Perfil não disponível", Toast.LENGTH_SHORT).show()
+                        }
+                        "playlist" -> if (parts.size >= 4) {
+                            val list = OcarinaLinks.readPlaylist(parts[2], parts[3])
+                            if (list != null) {
+                                sharedPlaylist = list
+                                screen = Screen.PUBLIC_PLAYLIST
+                            } else Toast.makeText(context, "Playlist não disponível", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Não foi possível abrir o link.", Toast.LENGTH_SHORT).show()
+            } finally {
+                OcarinaDeepLink.consumed(uri)
+            }
+        }
         LaunchedEffect(discoverRefresh, account.user?.uid) {
             if (account.user == null) return@LaunchedEffect
             discoveryLoading = true
@@ -494,8 +548,14 @@ fun OcarinaApp() {
                             screen = Screen.PLAYLIST_DETAIL
                         },
                         onShare = {
-                            shareText("Compartilhar perfil", "Perfil Ocarina: " +
-                                account.displayName.ifBlank { account.user?.displayName ?: "Usuário" })
+                            val uid = account.user?.uid
+                            if (uid != null && account.isPublic) {
+                                shareText("Compartilhar perfil", "Perfil no Ocarina\n${OcarinaLinks.profile(uid)}")
+                            } else if (uid != null) {
+                                Toast.makeText(context,
+                                    "Ative 'Aparecer na busca' em Editar perfil para compartilhar.",
+                                    Toast.LENGTH_LONG).show()
+                            }
                         },
                     )
                     Screen.PROFILE_EDIT -> OcarinaV5ProfileEdit(
@@ -505,7 +565,10 @@ fun OcarinaApp() {
                     )
                     Screen.PUBLIC_PROFILE -> selectedPublicProfile?.let { profile ->
                         OcarinaV5PublicProfile(profile,
-                            onShare = { shareText("Compartilhar perfil", "Ocarina: ${profile.displayName}") })
+                            onShare = { shareText("Compartilhar perfil", "${profile.displayName} • Ocarina\n${OcarinaLinks.profile(profile.uid)}") })
+                    }
+                    Screen.PUBLIC_PLAYLIST -> sharedPlaylist?.let { list ->
+                        OcarinaSharedPlaylistView(list, onPlay = { song -> playSong(song, list.songs) })
                     }
                     Screen.PLAYLISTS -> OcarinaPlaylistsPage(playlists,
                         onCreate = { creatingPlaylist = true },
@@ -530,7 +593,15 @@ fun OcarinaApp() {
                                 }
                             },
                             onRename = { updatePlaylist(list.copy(name = it.trim().take(80))) },
-                            onDelete = { savePlaylists(playlists.filterNot { it.id == list.id }); screen = Screen.PLAYLISTS },
+                            onDelete = {
+                                savePlaylists(playlists.filterNot { it.id == list.id })
+                                account.user?.uid?.let { uid ->
+                                    coroutineScope.launch {
+                                        runCatching { OcarinaLinks.removePublishedPlaylist(uid, list.id) }
+                                    }
+                                }
+                                screen = Screen.PLAYLISTS
+                            },
                             onShare = { sharePlaylist(list) },
                             onPlay = { song -> playSong(song, list.songs) },
                             onRemove = { song -> updatePlaylist(list.copy(songs = list.songs.filterNot { it.videoId == song.videoId })) },
@@ -1036,9 +1107,7 @@ private fun SongRow(song: Song, isFavorite: Boolean, onOpen: () -> Unit, onFavor
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         IconButton(onClick = onFavorite, modifier = Modifier.size(41.dp)) {
-            LIcon(LucideR.drawable.lucide_ic_heart,
-                if (isFavorite) "Remover dos favoritos" else "Adicionar aos favoritos",
-                Modifier.size(20.dp), if (isFavorite) c.accent else c.muted)
+            OcarinaHeart(liked = isFavorite, size = 20.dp)
         }
         if (onQueue != null || onPlaylist != null || onShare != null) {
             Box {
@@ -1176,8 +1245,7 @@ private fun NativePlayerScreen(
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 IconButton(onClick = onFavorite, enabled = !song.videoId.startsWith("local:")) {
-                    LIcon(LucideR.drawable.lucide_ic_heart, "Curtir música", Modifier.size(27.dp),
-                        if (isFavorite) c.accent else c.text)
+                    OcarinaHeart(liked = isFavorite, size = 27.dp)
                 }
             }
             if (playback.error != null) {

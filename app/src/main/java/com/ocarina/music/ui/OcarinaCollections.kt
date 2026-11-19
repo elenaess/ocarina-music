@@ -212,7 +212,6 @@ fun OcarinaCatalogBrowsePage(
         item {
             Text(title, fontSize = 29.sp, color = c.text, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(5.dp))
-            Text("Explore o catálogo e suas músicas salvas", color = c.muted, fontSize = 12.sp)
             Spacer(Modifier.height(14.dp))
             OutlinedTextField(query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(),
                 placeholder = { Text("Buscar ${title.lowercase()}") }, singleLine = true,

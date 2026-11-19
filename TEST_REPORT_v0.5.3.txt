@@ -1,0 +1,19 @@
+Ocarina v0.5.3 — relatório de verificações
+Base: código-fonte da versão 0.5.2 + correção do import não utilizado, últimas alterações verificadas localmente.
+
+RESULTADOS
+- 16 verificações funcionais/estruturais locais: passaram.
+- AndroidManifest e recursos XML: válidos.
+- Certificado de fonte Google Fonts: DER X.509 válido.
+- Shell scripts: passam em bash -n.
+- Gerador de assetlinks.json: testado com keystore simulado e SHA-256 fictício; arquivo fictício removido (não foi empacotado).
+- Parser Kotlin: nenhuma mensagem de erro de sintaxe do tipo "expecting token" nos arquivos alterados no teste sem classpath Android.
+
+NÃO TESTADO
+- Compilação Gradle Android (SDK Android ausente no ambiente).
+- APK instalado, login e performance em celular.
+- Abertura real do domínio (necessita publicar site e arquivo de verificação).
+- Publicação/leitura no Firebase em rede (necessita Rules atualizadas).
+
+IMPORTANTE
+O projeto está preparado para compilação, mas não foi validado como APK final.

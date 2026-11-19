@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Abrir no Ocarina</title><meta name="theme-color" content="#171419">
+<style>body{background:#171419;color:#f9f4f7;font:16px system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh}main{padding:32px;max-width:460px;text-align:center}h1{font-size:30px}p{color:#b4a8b3;line-height:1.5}a{display:inline-block;background:#f0acc0;color:#25151f;text-decoration:none;padding:14px 28px;border-radius:28px;font-weight:700;margin:10px}</style>
+</head><body><main><h1>Ocarina</h1><p>Este conteúdo está disponível no aplicativo. Toque abaixo para abrir.</p><a id="open" href="/ocarina/">Abrir no Ocarina</a></main>
+<script>
+const path=location.pathname;
+if(/^\/ocarina\/(track\/[a-zA-Z0-9_-]{11}|profile\/[a-zA-Z0-9_-]{8,128}|playlist\/[a-zA-Z0-9_-]{8,128}\/[a-f0-9-]{36})\/?$/.test(path)){
+ const route=path.replace(/^\//,"");
+ document.getElementById("open").href="intent://elena.services/"+route+location.search+"#Intent;scheme=https;package=com.ocarina.app;end";
+} else {document.querySelector('p').textContent='Esta página não foi encontrada.';}
+</script></body></html>

@@ -7,7 +7,14 @@ import org.json.JSONObject
 /** Lightweight local preferences; listening history is isolated by account. */
 class OcarinaSettings(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences("ocarina_preferences", Context.MODE_PRIVATE)
-    fun isDark(): Boolean = preferences.getBoolean("dark_theme", false)
+    fun isDark(): Boolean {
+        if (!preferences.getBoolean("dark_default_v053", false)) {
+            preferences.edit().putBoolean("dark_theme", true)
+                .putBoolean("dark_default_v053", true).apply()
+            return true
+        }
+        return preferences.getBoolean("dark_theme", true)
+    }
     fun setDark(value: Boolean) { preferences.edit().putBoolean("dark_theme", value).apply() }
     fun repeatMode(): Int = preferences.getInt("repeat_mode", 0).coerceIn(0, 2)
     fun setRepeatMode(value: Int) { preferences.edit().putInt("repeat_mode", value.coerceIn(0, 2)).apply() }

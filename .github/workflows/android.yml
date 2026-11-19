@@ -42,6 +42,6 @@ jobs:
         run: gradle --no-daemon :app:assembleDebug --stacktrace --warning-mode=all
       - uses: actions/upload-artifact@v4
         with:
-          name: ocarina-v0.5.2-themed-icon-debug
+          name: ocarina-v0.5.3-dark-font-links-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
