@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -312,15 +313,13 @@ private fun V5Cover(song: Song, onClick: () -> Unit, width: Dp = 150.dp) {
 @Composable
 private fun V5SongRow(song: Song, liked: Boolean, onPlay: () -> Unit,
     onLike: () -> Unit, onQueue: () -> Unit, onPlaylist: () -> Unit, onShare: () -> Unit,
-    showQuality: Boolean = false, quality: String? = null,
-    onQualityVerified: ((String, String) -> Unit)? = null) {
+    probeOnVisible: Boolean = false, quality: String? = null) {
     val c = ocarinaColors
     var menu by remember { mutableStateOf(false) }
-    LaunchedEffect(song.videoId, showQuality) {
-        if (showQuality && song.category == "music") {
-            val found = HighQualitySourceResolver.probeQualityBadge(song)
-            if (found != null) onQualityVerified?.invoke(song.videoId, found)
-        }
+    // Only rows beyond the early prefetch window probe when scrolled into view.
+    LaunchedEffect(song.videoId, probeOnVisible) {
+        if (probeOnVisible && song.category == "music")
+            HighQualitySourceResolver.probeQualityBadge(song)
     }
     Row(Modifier.fillMaxWidth().height(67.dp).clickable(onClick = onPlay),
         verticalAlignment = Alignment.CenterVertically) {
@@ -339,10 +338,15 @@ private fun V5SongRow(song: Song, liked: Boolean, onPlay: () -> Unit,
                     modifier = Modifier.weight(1f), color = c.muted, fontSize = 12.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 quality?.let { badge ->
-                    Text("[$badge]",
-                        modifier = Modifier.clip(RoundedCornerShape(6.dp))
-                            .background(c.softAccent).padding(horizontal = 6.dp, vertical = 2.dp),
-                        color = c.accent, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                    val confirmed = badge == "FLAC" || badge == "HQ"
+                    val capsule = RoundedCornerShape(50)
+                    Text(if (confirmed) "$badge ✓" else "FLAC?",
+                        modifier = Modifier.clip(capsule)
+                            .background(if (confirmed) c.softAccent else c.elevated)
+                            .border(1.dp, if (confirmed) c.accent.copy(alpha = 0.42f) else c.outline, capsule)
+                            .padding(horizontal = 9.dp, vertical = 3.dp),
+                        color = if (confirmed) c.accent else c.muted,
+                        fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
                         maxLines = 1)
                 }
             }
@@ -462,8 +466,8 @@ fun OcarinaV5Search(listState: LazyListState, query: String, onQuery: (String) -
     var filter by remember { mutableStateOf("Tudo") }
     val likedIds = remember(favorites) { derivedStateOf { favorites.map { it.videoId }.toHashSet() } }
     val hasQuery = query.trim().isNotEmpty()
-    // Results keep their original order until quality is actually verified.
-    val qualityById = remember(query) { mutableStateMapOf<String, String>() }
+    // Shared observable state: playback failure removes a badge instantly from search.
+    val qualityById = HighQualitySourceResolver.qualityLabels
     val filtered = remember(songs, filter) {
         when (filter) {
             "Música" -> songs.filter { it.category == "music" }
@@ -474,21 +478,19 @@ fun OcarinaV5Search(listState: LazyListState, query: String, onQuery: (String) -
             else -> songs.sortedBy { when(it.category) { "music" -> 0; "video" -> 1; "podcast" -> 2; "live" -> 3; else -> 4 } }
         }
     }
-    // Check a small leading window even before scrolling; the resolver limits network concurrency.
+    // Fast leading-window prefetch, without duplicate on-screen probes.
     LaunchedEffect(query, filtered) {
-        if (hasQuery) filtered.asSequence().filter { it.category == "music" }.take(12).forEach { song ->
-            launch {
-                val badge = HighQualitySourceResolver.probeQualityBadge(song)
-                if (badge != null) qualityById[song.videoId] = badge
-            }
+        if (hasQuery) filtered.asSequence().filter { it.category == "music" }.take(14).forEach { song ->
+            launch { HighQualitySourceResolver.probeQualityBadge(song) }
         }
     }
-    // Stable sort: FLAC first, then verified 320+ kbps HQ, then unverified entries.
+    // Confirmed FLAC/HQ first; header-only candidates are marked as uncertain.
     val ranked = filtered.sortedBy { song ->
         when (qualityById[song.videoId]) {
             "FLAC" -> 0
             "HQ" -> 1
-            else -> 2
+            "FLAC?" -> 2
+            else -> 3
         }
     }
     LazyColumn(Modifier.fillMaxSize(), state = listState,
@@ -562,13 +564,13 @@ fun OcarinaV5Search(listState: LazyListState, query: String, onQuery: (String) -
                 else if (filtered.isEmpty()) item {
                     Text("Nenhum resultado de ${filter.lowercase()} encontrado.", color = c.muted)
                 }
-                else items(ranked, key = { "search:${it.videoId}" }, contentType = { "song" }) { song ->
+                else itemsIndexed(ranked, key = { _, song -> "search:${song.videoId}" },
+                    contentType = { _, _ -> "song" }) { index, song ->
                     V5SongRow(song, likedIds.value.contains(song.videoId),
                         onPlay = { onPlay(song) }, onLike = { onLike(song) },
                         onQueue = { onQueue(song) }, onPlaylist = { onPlaylist(song) },
-                        onShare = { onShare(song) }, showQuality = song.category == "music",
-                        quality = qualityById[song.videoId],
-                        onQualityVerified = { id, badge -> qualityById[id] = badge })
+                        onShare = { onShare(song) }, probeOnVisible = index >= 14,
+                        quality = qualityById[song.videoId])
                 }
             }
             if (filter == "Perfis" || filter == "Tudo") {

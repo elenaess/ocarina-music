@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -50,6 +51,11 @@ class PlaybackConnector(context: Context) {
     private val connected = CompletableDeferred<MediaController>()
     private var resolving: Job? = null
     private var retryingSource = false
+    private var selectedSourceCodec = ""
+    private var selectedSourceUri: Uri? = null
+    private var lastReadySerial = -1L
+    var flacFallback by mutableStateOf(false)
+        private set
     private var playSerial = 0L
     private var endedForSerial = -1L
     var onTrackEnded: ((Song) -> Unit)? = null
@@ -94,6 +100,7 @@ class PlaybackConnector(context: Context) {
                 "FLAC • ${sourceBitDepth}-bit/${sourceSampleRateHz / 1000.0} kHz"
             sourceCodec == "FLAC" -> "FLAC • Lossless"
             sourceCodec == "MP3" && sourceBitrateKbps >= 320L -> "MP3 • ${sourceBitrateKbps} kbps"
+            sourceBitrateKbps > 0 && flacFallback -> "~${sourceBitrateKbps} kbps • FLAC indisponível"
             sourceBitrateKbps > 0 -> "~${sourceBitrateKbps} kbps"
             else -> if (preferFlac) "HQ • Auto" else "Padrão"
         }
@@ -104,6 +111,21 @@ class PlaybackConnector(context: Context) {
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
             sync(player)
+            // Checking a header or receiving track metadata is NOT enough to mark FLAC.
+            if (player.playbackState == Player.STATE_READY && lastReadySerial != playSerial &&
+                player.currentMediaItem?.mediaId == currentSong?.videoId &&
+                player.currentMediaItem?.localConfiguration?.uri == selectedSourceUri) {
+                val format = player.currentTracks.groups.asSequence()
+                    .filter { it.type == C.TRACK_TYPE_AUDIO }
+                    .flatMap { group -> (0 until group.length).asSequence()
+                        .filter { group.isTrackSelected(it) }.map { group.getTrackFormat(it) } }
+                    .firstOrNull()
+                if (format != null) {
+                    currentSong?.let { HighQualitySourceResolver.noteReadyFormat(
+                        it.videoId, selectedSourceCodec, format.sampleMimeType, format.bitrate) }
+                    lastReadySerial = playSerial
+                }
+            }
             if (player.playbackState == Player.STATE_ENDED && repeatMode != 1 &&
                 controller?.currentMediaItem?.mediaId == currentSong?.videoId &&
                 endedForSerial != playSerial) {
@@ -113,6 +135,8 @@ class PlaybackConnector(context: Context) {
             }
         }
         override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            if (controller?.currentMediaItem?.mediaId != currentSong?.videoId ||
+                controller?.currentMediaItem?.localConfiguration?.uri != selectedSourceUri) return
             for (group in tracks.groups) {
                 if (group.type != C.TRACK_TYPE_AUDIO) continue
                 for (i in 0 until group.length) {
@@ -126,24 +150,27 @@ class PlaybackConnector(context: Context) {
                         "audio/mp4a-latm" -> sourceCodec = "AAC"
                     }
                     if (format.sampleRate > 0) sourceSampleRateHz = format.sampleRate
-                    currentSong?.let { song ->
-                        HighQualitySourceResolver.notePlayableFormat(
-                            song.videoId, format.sampleMimeType, format.bitrate)
-                    }
                     break
                 }
             }
         }
         override fun onPlayerError(error: PlaybackException) {
             Log.e("OcarinaPlayback", "Falha Media3 na faixa ${currentSong?.videoId}", error)
-            if (resolvingAudio || controller?.currentMediaItem?.mediaId != currentSong?.videoId) return
-            if (sourceCodec == "FLAC") currentSong?.let(HighQualitySourceResolver::markUnavailable)
+            if (controller?.currentMediaItem?.mediaId != currentSong?.videoId ||
+                controller?.currentMediaItem?.localConfiguration?.uri != selectedSourceUri) return
+            val failedFlac = selectedSourceCodec == "FLAC"
+            if (resolvingAudio && !failedFlac) return
+            if (failedFlac) {
+                currentSong?.let(HighQualitySourceResolver::markUnavailable)
+                flacFallback = true
+                Toast.makeText(appContext, "FLAC indisponível • usando fonte padrão", Toast.LENGTH_SHORT).show()
+            }
             // Expiring temporary URLs occasionally return 403. Retry the current track once.
             if (!retryingSource && currentSong != null &&
                 controller?.currentMediaItem?.mediaId == currentSong?.videoId &&
                 (error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
                     error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
-                    sourceCodec == "FLAC")) {
+                    failedFlac)) {
                 retryingSource = true
                 // Schedule outside Media3's callback, avoiding reentrant player mutation.
                 val failed = currentSong!!
@@ -212,7 +239,13 @@ class PlaybackConnector(context: Context) {
         resolving?.cancel()
         val thisRequest = ++playSerial
         endedForSerial = -1L
-        if (!isRetry) retryingSource = false
+        lastReadySerial = -1L
+        selectedSourceCodec = ""
+        selectedSourceUri = null
+        if (!isRetry) {
+            retryingSource = false
+            flacFallback = false
+        }
         resolvingAudio = true
         // Only pause the previous track: stop()/clearMediaItems() cause extra MediaSession
         // transitions and can synchronously restore stale metadata into Compose.
@@ -235,6 +268,8 @@ class PlaybackConnector(context: Context) {
                 val c = connected.await()
                 if (thisRequest != playSerial) return@launch
                 sourceBitrateKbps = source.bitrateKbps.toLong()
+                selectedSourceCodec = source.codec
+                selectedSourceUri = Uri.parse(source.url)
                 sourceCodec = source.codec
                 sourceSampleRateHz = source.sampleRateHz
                 sourceBitDepth = source.bitDepth
@@ -242,6 +277,7 @@ class PlaybackConnector(context: Context) {
                 val item = MediaItem.Builder()
                     .setMediaId(song.videoId)
                     .setUri(source.url)
+                    .setMimeType(if (source.codec == "FLAC") "audio/flac" else null)
                     .setMediaMetadata(MediaMetadata.Builder()
                         .setTitle(song.title)
                         .setArtist(song.artist)
@@ -280,6 +316,10 @@ class PlaybackConnector(context: Context) {
         sourceSampleRateHz = 0
         sourceBitDepth = 0
         sourceProvider = ""
+        selectedSourceCodec = ""
+        selectedSourceUri = null
+        lastReadySerial = -1L
+        flacFallback = false
         error = null
         controller?.stop()
         controller?.clearMediaItems()

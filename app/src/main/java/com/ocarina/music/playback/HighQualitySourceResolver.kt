@@ -1,6 +1,7 @@
 package com.ocarina.music.playback
 
 import com.ocarina.music.data.Song
+import androidx.compose.runtime.mutableStateMapOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -34,61 +35,95 @@ internal object HighQualitySourceResolver {
 
     private data class Cached(val audio: ResolvedAudio?, val createdAt: Long)
     private val lock = Any()
+    // Observable single source of truth for the search UI and playback confirmation.
+    // FLAC? = ranged FLAC header only; FLAC = Media3 reached READY with FLAC selected.
+    val qualityLabels = mutableStateMapOf<String, String>()
+    private val previewAt = mutableMapOf<String, Long>()
     private val unavailableUntil = mutableMapOf<String, Long>()
     // Only two simultaneous network checks, never one request per whole search result page.
-    private val badgeGate = Semaphore(2)
+    private val badgeGate = Semaphore(4)
     private val confirmedPlayback = object : LinkedHashMap<String, Pair<String, Long>>(40, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<String, Long>>) = size > 40
     }
 
-    /** Store only a codec/bitrate Media3 actually identified during playback. */
-    fun notePlayableFormat(videoId: String, mime: String?, bitrateBitsPerSecond: Int) {
-        val tag = when {
-            mime == "audio/flac" || mime == "audio/x-flac" -> "FLAC"
-            bitrateBitsPerSecond >= 320_000 &&
-                mime in setOf("audio/mpeg", "audio/mp4a-latm", "audio/opus") -> "HQ"
+    /** Called ONLY after Media3 has a selected audio track and reached STATE_READY. */
+    fun noteReadyFormat(videoId: String, selectedCodec: String, mime: String?, bitrateBitsPerSecond: Int) {
+        val label = when {
+            selectedCodec == "FLAC" && mime in setOf("audio/flac", "audio/x-flac") -> "FLAC"
+            mime in setOf("audio/mpeg", "audio/mp4a-latm", "audio/opus") &&
+                bitrateBitsPerSecond >= 320_000 -> "HQ"
             else -> null
-        } ?: return
+        }
         synchronized(lock) {
-            confirmedPlayback[videoId] = tag to System.currentTimeMillis()
+            if (label == null) {
+                confirmedPlayback.remove(videoId)
+                qualityLabels.remove(videoId)
+                previewAt.remove(videoId)
+            } else {
+                confirmedPlayback[videoId] = label to System.currentTimeMillis()
+                qualityLabels[videoId] = label
+                previewAt.remove(videoId)
+            }
         }
     }
 
-    /** Lightweight background probe for a visible search row; no fake quality badges. */
+    /** A ranged FLAC header is a *candidate*, not a successful playback. */
     suspend fun probeQualityBadge(song: Song): String? {
         if (song.category != "music" || song.videoId.startsWith("local:")) return null
+        val key = keyFor(song)
         synchronized(lock) {
-            confirmedPlayback[song.videoId]?.let { (tag, checkedAt) ->
-                if (System.currentTimeMillis() - checkedAt < 10 * 60_000L) return tag
+            val now = System.currentTimeMillis()
+            if ((unavailableUntil[key] ?: 0L) > now) {
+                qualityLabels.remove(song.videoId)
+                return null
+            }
+            confirmedPlayback[song.videoId]?.let { (label, checked) ->
+                if (now - checked < 10 * 60_000L) return label
                 confirmedPlayback.remove(song.videoId)
             }
+            if (qualityLabels[song.videoId] == "FLAC?" &&
+                now - (previewAt[song.videoId] ?: 0L) < 90_000L) return "FLAC?"
+            qualityLabels.remove(song.videoId)
+            previewAt.remove(song.videoId)
         }
         return try {
-            withTimeoutOrNull(5_500L) {
+            withTimeoutOrNull(4_500L) {
                 badgeGate.acquire()
                 try {
                     val found = withContext(Dispatchers.IO) { findVerifiedFlac(song, refresh = false) }
-                    if (found?.codec == "FLAC") "FLAC" else null
+                    synchronized(lock) {
+                        if ((unavailableUntil[key] ?: 0L) > System.currentTimeMillis()) {
+                            qualityLabels.remove(song.videoId)
+                            null
+                        } else if (qualityLabels[song.videoId] in setOf("FLAC", "HQ")) {
+                            qualityLabels[song.videoId]
+                        } else if (found?.codec == "FLAC") {
+                            qualityLabels[song.videoId] = "FLAC?"
+                            previewAt[song.videoId] = System.currentTimeMillis()
+                            "FLAC?"
+                        } else null
+                    }
                 } finally {
                     badgeGate.release()
                 }
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
-            null
-        }
+        } catch (_: Exception) { null }
     }
 
     /** If Media3 cannot decode or stream a FLAC, temporarily fall back to NewPipe. */
     fun markUnavailable(song: Song) {
-        val key = "${song.title.lowercase(Locale.ROOT)}|${song.artist.lowercase(Locale.ROOT)}"
         synchronized(lock) {
-            unavailableUntil[key] = System.currentTimeMillis() + 2 * 60_000L
-            cache.remove(key)
+            unavailableUntil[keyFor(song)] = System.currentTimeMillis() + 20 * 60_000L
+            cache.remove(keyFor(song))
             confirmedPlayback.remove(song.videoId)
+            previewAt.remove(song.videoId)
+            qualityLabels.remove(song.videoId)
         }
     }
+    private fun keyFor(song: Song): String =
+        "${song.title.lowercase(Locale.ROOT)}|${song.artist.lowercase(Locale.ROOT)}"
     private val cache = object : LinkedHashMap<String, Cached>(64, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Cached>): Boolean = size > 64
     }
@@ -110,7 +145,7 @@ internal object HighQualitySourceResolver {
     }
 
     private fun findVerifiedFlac(song: Song, refresh: Boolean): ResolvedAudio? {
-        val key = "${song.title.lowercase(Locale.ROOT)}|${song.artist.lowercase(Locale.ROOT)}"
+        val key = keyFor(song)
         val now = System.currentTimeMillis()
         synchronized(lock) {
             if ((unavailableUntil[key] ?: 0L) > now) return null
@@ -187,9 +222,13 @@ internal object HighQualitySourceResolver {
     /** FLAC stream metadata from the STREAMINFO block (not an assumed 1411 kbps). */
     private fun flacHeader(url: String): Pair<Int, Int>? {
         val req = Request.Builder().url(url).get().header("Range", "bytes=0-41")
+            .header("User-Agent", "Ocarina/0.5.5 (Android)")
             .header("Accept-Encoding", "identity").build()
         return http.newCall(req).execute().use { response ->
-            if (response.code != 200 && response.code != 206) return@use null
+            // An HTTP 200 full-body reply to a Range request is not verified seekable.
+            if (response.code != 206 ||
+                !response.header("Content-Range").orEmpty().startsWith("bytes 0-") ||
+                response.header("Content-Encoding")?.lowercase(Locale.ROOT) == "gzip") return@use null
             val input = response.body?.byteStream() ?: return@use null
             val bytes = ByteArray(42)
             var read = 0
