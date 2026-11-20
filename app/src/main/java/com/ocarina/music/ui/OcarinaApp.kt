@@ -105,10 +105,12 @@ fun OcarinaApp() {
         val c = ocarinaColors
         SideEffect {
             (context as? Activity)?.window?.let { window ->
-                window.statusBarColor = if (dark) android.graphics.Color.rgb(23, 20, 25)
+                // A janela atrás do Compose deve ter a mesma cor da tela durante animações.
+                val windowBackground = if (dark) android.graphics.Color.rgb(23, 20, 25)
                     else android.graphics.Color.rgb(251, 247, 247)
-                window.navigationBarColor = if (dark) android.graphics.Color.rgb(23, 20, 25)
-                    else android.graphics.Color.rgb(251, 247, 247)
+                window.decorView.setBackgroundColor(windowBackground)
+                window.statusBarColor = windowBackground
+                window.navigationBarColor = windowBackground
                 val controller = WindowInsetsControllerCompat(window, window.decorView)
                 controller.isAppearanceLightStatusBars = !dark
                 controller.isAppearanceLightNavigationBars = !dark
@@ -480,7 +482,7 @@ fun OcarinaApp() {
             }
         }
         if (!account.authReady) {
-            Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
+            Column(Modifier.fillMaxSize().background(c.background), horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center) {
                 OcarinaMark(Modifier.size(86.dp), c.accent)
                 Spacer(Modifier.height(22.dp))
@@ -489,7 +491,8 @@ fun OcarinaApp() {
         } else if (account.user == null) {
             OcarinaV5Login(account)
         } else {
-        Box(Modifier.fillMaxSize()) {
+        // O Scaffold some ao abrir o player: mantenha o fundo pintado por baixo da transição.
+        Box(Modifier.fillMaxSize().background(c.background)) {
         if (!showFullPlayer || playback.currentSong == null) {
         Scaffold(
             containerColor = c.background,

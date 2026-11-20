@@ -10,8 +10,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         OcarinaDeepLink.offer(intent?.data)
-        window.statusBarColor = android.graphics.Color.rgb(18, 21, 18)
-        window.navigationBarColor = android.graphics.Color.rgb(18, 21, 18)
+        // Antes de o Compose desenhar, evita o branco da janela padrão do Android.
+        val prefs = getSharedPreferences("ocarina_preferences", MODE_PRIVATE)
+        val dark = !prefs.getBoolean("dark_default_v053", false) || prefs.getBoolean("dark_theme", true)
+        val background = if (dark) android.graphics.Color.rgb(23, 20, 25)
+            else android.graphics.Color.rgb(251, 247, 247)
+        window.decorView.setBackgroundColor(background)
+        window.statusBarColor = background
+        window.navigationBarColor = background
         setContent { OcarinaApp() }
     }
 
