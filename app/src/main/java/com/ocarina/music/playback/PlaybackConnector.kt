@@ -51,6 +51,7 @@ class PlaybackConnector(context: Context) {
     private val connected = CompletableDeferred<MediaController>()
     private var resolving: Job? = null
     private var retryingSource = false
+    private var retriedFlacConnection = false
     private var selectedSourceCodec = ""
     private var selectedSourceUri: Uri? = null
     private var lastReadySerial = -1L
@@ -121,8 +122,13 @@ class PlaybackConnector(context: Context) {
                         .filter { group.isTrackSelected(it) }.map { group.getTrackFormat(it) } }
                     .firstOrNull()
                 if (format != null) {
-                    currentSong?.let { HighQualitySourceResolver.noteReadyFormat(
-                        it.videoId, selectedSourceCodec, format.sampleMimeType, format.bitrate) }
+                    currentSong?.let { song ->
+                        HighQualitySourceResolver.noteReadyFormat(
+                            song.videoId, selectedSourceCodec, format.sampleMimeType, format.bitrate)
+                        val real = HighQualitySourceResolver.qualityLabels[song.videoId]
+                        if (real == "FLAC" || real == "HQ")
+                            OcarinaQualityHistory.recordVerified(song.videoId, real)
+                    }
                     lastReadySerial = playSerial
                 }
             }
@@ -160,8 +166,21 @@ class PlaybackConnector(context: Context) {
                 controller?.currentMediaItem?.localConfiguration?.uri != selectedSourceUri) return
             val failedFlac = selectedSourceCodec == "FLAC"
             if (resolvingAudio && !failedFlac) return
+            // One fresh connection attempt for transient CDN/server failures before downgrade.
+            val retryable = error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
+                error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+            if (failedFlac && retryable && !retriedFlacConnection) {
+                retriedFlacConnection = true
+                val failed = currentSong ?: return
+                scope.launch { play(failed, refresh = true, isRetry = true) }
+                return
+            }
             if (failedFlac) {
-                currentSong?.let(HighQualitySourceResolver::markUnavailable)
+                currentSong?.let {
+                    HighQualitySourceResolver.markUnavailable(it)
+                    OcarinaQualityHistory.invalidate(it.videoId)
+                }
                 flacFallback = true
                 Toast.makeText(appContext, "FLAC indisponível • usando fonte padrão", Toast.LENGTH_SHORT).show()
             }
@@ -244,6 +263,7 @@ class PlaybackConnector(context: Context) {
         selectedSourceUri = null
         if (!isRetry) {
             retryingSource = false
+            retriedFlacConnection = false
             flacFallback = false
         }
         resolvingAudio = true
@@ -320,6 +340,7 @@ class PlaybackConnector(context: Context) {
         selectedSourceUri = null
         lastReadySerial = -1L
         flacFallback = false
+        retriedFlacConnection = false
         error = null
         controller?.stop()
         controller?.clearMediaItems()

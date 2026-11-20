@@ -340,7 +340,7 @@ private fun V5SongRow(song: Song, liked: Boolean, onPlay: () -> Unit,
                 quality?.let { badge ->
                     val confirmed = badge == "FLAC" || badge == "HQ"
                     val capsule = RoundedCornerShape(50)
-                    Text(if (confirmed) "$badge ✓" else "FLAC?",
+                    Text(if (confirmed) "$badge ✓" else badge,
                         modifier = Modifier.clip(capsule)
                             .background(if (confirmed) c.softAccent else c.elevated)
                             .border(1.dp, if (confirmed) c.accent.copy(alpha = 0.42f) else c.outline, capsule)
@@ -480,7 +480,7 @@ fun OcarinaV5Search(listState: LazyListState, query: String, onQuery: (String) -
     }
     // Fast leading-window prefetch, without duplicate on-screen probes.
     LaunchedEffect(query, filtered) {
-        if (hasQuery) filtered.asSequence().filter { it.category == "music" }.take(14).forEach { song ->
+        if (hasQuery) filtered.asSequence().filter { it.category == "music" }.take(10).forEach { song ->
             launch { HighQualitySourceResolver.probeQualityBadge(song) }
         }
     }
@@ -488,9 +488,10 @@ fun OcarinaV5Search(listState: LazyListState, query: String, onQuery: (String) -
     val ranked = filtered.sortedBy { song ->
         when (qualityById[song.videoId]) {
             "FLAC" -> 0
-            "HQ" -> 1
-            "FLAC?" -> 2
-            else -> 3
+            "FLAC?" -> 1
+            "HQ" -> 2
+            "HQ?" -> 3
+            else -> 4
         }
     }
     LazyColumn(Modifier.fillMaxSize(), state = listState,
@@ -569,7 +570,7 @@ fun OcarinaV5Search(listState: LazyListState, query: String, onQuery: (String) -
                     V5SongRow(song, likedIds.value.contains(song.videoId),
                         onPlay = { onPlay(song) }, onLike = { onLike(song) },
                         onQueue = { onQueue(song) }, onPlaylist = { onPlaylist(song) },
-                        onShare = { onShare(song) }, probeOnVisible = index >= 14,
+                        onShare = { onShare(song) }, probeOnVisible = index >= 10,
                         quality = qualityById[song.videoId])
                 }
             }

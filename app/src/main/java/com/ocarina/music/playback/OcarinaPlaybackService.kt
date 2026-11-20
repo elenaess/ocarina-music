@@ -29,6 +29,8 @@ class OcarinaPlaybackService : MediaSessionService() {
         )
         cache = simpleCache
         val httpFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Android) AppleWebKit/537.36 Chrome/126.0.0.0 Mobile Safari/537.36")
+            .setDefaultRequestProperties(mapOf("Accept-Encoding" to "identity"))
             // Match the FLAC range probe request; differing clients can get different responses.
             .setUserAgent("Ocarina/0.5.5 (Android)")
             .setConnectTimeoutMs(8_000)

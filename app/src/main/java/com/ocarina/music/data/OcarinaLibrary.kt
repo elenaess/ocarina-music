@@ -174,6 +174,80 @@ class OcarinaOfflineStore(private val context: Context) {
         return result
     }
 
+    /** Download an audio file the user is licensed/authorized to keep, from a direct HTTPS URL. */
+    suspend fun downloadAuthorizedAudio(link: String): Song = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val url = Uri.parse(link.trim())
+        val host = url.host.orEmpty().lowercase(java.util.Locale.ROOT)
+        require(url.scheme == "https" && host.contains('.') &&
+            host.matches(Regex("[a-z0-9.-]{4,253}")) &&
+            !host.matches(Regex("[0-9.]+")) && !host.endsWith(".local") &&
+            !host.endsWith(".internal") && !host.endsWith(".lan") &&
+            !host.contains("youtube.com") && !host.contains("youtu.be") &&
+            !host.contains("googlevideo.com")) {
+            "Use um link HTTPS direto para um arquivo de áudio autorizado, não uma página de vídeo."
+        }
+        val client = okhttp3.OkHttpClient.Builder().followRedirects(false)
+            .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(25, java.util.concurrent.TimeUnit.SECONDS).build()
+        val request = okhttp3.Request.Builder().url(link.trim()).get().build()
+        var saved: File? = null
+        try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw IOException("Servidor respondeu ${response.code}.")
+                val mime = response.header("Content-Type").orEmpty().substringBefore(';').lowercase()
+                val suffix = url.lastPathSegment.orEmpty().substringAfterLast('.', "").lowercase()
+                val known = suffix in setOf("mp3", "flac", "wav", "m4a", "aac", "ogg", "opus")
+                if (!mime.startsWith("audio/") && !(mime == "application/octet-stream" && known))
+                    throw IOException("O link não apontou para um arquivo de áudio compatível.")
+                val extension = when {
+                    known -> suffix
+                    mime.contains("flac") -> "flac"
+                    mime.contains("mpeg") -> "mp3"
+                    mime.contains("wav") -> "wav"
+                    mime.contains("ogg") -> "ogg"
+                    mime.contains("aac") -> "aac"
+                    else -> "m4a"
+                }
+                if ((response.body?.contentLength() ?: -1L) > 150L * 1024 * 1024)
+                    throw IOException("Arquivo maior que 150 MB.")
+                val id = UUID.randomUUID().toString()
+                val target = File(directory, "$id.$extension")
+                saved = target
+                val input = response.body?.byteStream() ?: throw IOException("Resposta sem áudio.")
+                input.use { stream -> target.outputStream().use { out ->
+                    val buffer = ByteArray(32768)
+                    var bytes = 0L
+                    while (true) {
+                        val read = stream.read(buffer)
+                        if (read < 0) break
+                        bytes += read
+                        if (bytes > 150L * 1024 * 1024) throw IOException("Áudio acima de 150 MB.")
+                        out.write(buffer, 0, read)
+                    }
+                    if (bytes == 0L) throw IOException("O arquivo estava vazio.")
+                } }
+                val metadata = MediaMetadataRetriever()
+                var name: String? = null
+                var artist: String? = null
+                try {
+                    metadata.setDataSource(target.absolutePath)
+                    name = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                    artist = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                } catch (_: Exception) { /* Fall back to filename. */ }
+                finally { runCatching { metadata.release() } }
+                val label = url.lastPathSegment.orEmpty().substringBeforeLast('.').ifBlank { "Áudio offline" }
+                val song = Song("local:$id", name?.takeIf { it.isNotBlank() }?.take(160)
+                    ?: Uri.decode(label).take(160), artist?.takeIf { it.isNotBlank() }?.take(120)
+                    ?: "Arquivo autorizado", "")
+                save(listOf(song) + load())
+                song
+            }
+        } catch (e: Exception) {
+            saved?.delete()
+            throw e
+        }
+    }
+
     fun remove(song: Song) {
         if (!song.videoId.startsWith("local:")) return
         save(load().filterNot { it.videoId == song.videoId })

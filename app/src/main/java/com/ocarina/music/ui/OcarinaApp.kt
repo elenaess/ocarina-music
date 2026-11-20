@@ -67,6 +67,9 @@ import com.ocarina.music.data.OcarinaPublicProfile
 import com.ocarina.music.data.OcarinaOfflineStore
 import com.ocarina.music.data.OcarinaPlaylist
 import com.ocarina.music.data.OcarinaPlaylistStore
+import com.ocarina.music.data.OcarinaCloudLibrary
+import com.ocarina.music.playback.OcarinaQualityHistory
+import com.ocarina.music.playback.HighQualitySourceResolver
 import com.ocarina.music.data.FavoritesStore
 import com.ocarina.music.data.OcarinaSettings
 import com.ocarina.music.data.OcarinaAccount
@@ -150,11 +153,14 @@ fun OcarinaApp() {
         var switchingTabs by remember { mutableStateOf(false) }
         var syncedAccount by remember { mutableStateOf<String?>(null) }
         val playlistStore = remember(context) { OcarinaPlaylistStore(context) }
+        val cloudLibrary = remember { OcarinaCloudLibrary() }
+        var cloudPlaylistStatus by remember { mutableStateOf("Somente neste aparelho") }
         val offlineStore = remember(context) { OcarinaOfflineStore(context) }
         val coroutineScope = rememberCoroutineScope()
         var playlists by remember { mutableStateOf(playlistStore.load(account.user?.uid)) }
         var offlineSongs by remember { mutableStateOf(offlineStore.load()) }
         var importing by remember { mutableStateOf(false) }
+        var directDownloading by remember { mutableStateOf(false) }
         var importMessage by remember { mutableStateOf<String?>(null) }
         var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
         var playlistReturnScreen by remember { mutableStateOf(Screen.PLAYLISTS) }
@@ -188,8 +194,21 @@ fun OcarinaApp() {
             }
         }
         fun savePlaylists(items: List<OcarinaPlaylist>) {
+            val previous = playlists
             playlists = items
-            playlistStore.save(account.user?.uid, items)
+            val uid = account.user?.uid
+            playlistStore.save(uid, items)
+            if (uid != null) coroutineScope.launch {
+                cloudPlaylistStatus = "Salvando na nuvem..."
+                try {
+                    cloudLibrary.syncDiff(uid, previous, items)
+                    cloudPlaylistStatus = "Sincronizado com Firebase"
+                } catch (e: Exception) {
+                    cloudPlaylistStatus = "Somente neste aparelho"
+                    Toast.makeText(context, "Playlist salva no celular; falha no Firebase: ${e.localizedMessage}",
+                        Toast.LENGTH_LONG).show()
+                }
+            }
         }
         fun updatePlaylist(list: OcarinaPlaylist) {
             savePlaylists(playlists.map { if (it.id == list.id) list else it })
@@ -271,11 +290,42 @@ fun OcarinaApp() {
                 screen = Screen.HOME
             }
             syncedAccount = null
+            OcarinaQualityHistory.bind(context, account.user?.uid)
             favorites.clear()
             favorites.addAll(store.load(account.user?.uid))
             playlists = playlistStore.load(account.user?.uid)
             recent.clear()
             recent.addAll(settings.recentlyPlayed(account.user?.uid))
+        }
+        // Fetch remote playlists on login. Local lists are migrated privately on first sync.
+        LaunchedEffect(account.user?.uid) {
+            val uid = account.user?.uid ?: return@LaunchedEffect
+            cloudPlaylistStatus = "Buscando playlists no Firebase..."
+            try {
+                val remote = cloudLibrary.load(uid)
+                if (account.user?.uid != uid) return@LaunchedEffect
+                val local = playlistStore.load(uid)
+                if (remote.isEmpty()) {
+                    if (local.isNotEmpty()) cloudLibrary.syncDiff(uid, emptyList(), local)
+                } else {
+                    playlists = remote
+                    playlistStore.save(uid, remote)
+                }
+                cloudPlaylistStatus = "Sincronizado com Firebase"
+            } catch (_: Exception) {
+                // Cloud unavailable: never erase local playlists.
+                cloudPlaylistStatus = "Somente neste aparelho"
+            }
+        }
+        // Gradually warm only the user's own collection, never crawl YouTube's catalog.
+        LaunchedEffect(account.user?.uid, favorites.size, playlists.size) {
+            if (account.user == null) return@LaunchedEffect
+            delay(1000)
+            (favorites.toList() + playlists.flatMap { it.songs }).distinctBy { it.videoId }
+                .asSequence().filter { it.category == "music" && !it.videoId.startsWith("local:") }
+                .take(16).forEach { song ->
+                    launch { HighQualitySourceResolver.probeQualityBadge(song) }
+                }
         }
         LaunchedEffect(account.user?.uid, account.favoritesReady, account.cloudFavorites) {
             val uid = account.user?.uid ?: return@LaunchedEffect
@@ -608,6 +658,7 @@ fun OcarinaApp() {
                     }
                     Screen.PLAYLISTS -> OcarinaPlaylistsPage(playlists,
                         onCreate = { creatingPlaylist = true },
+                        syncLabel = cloudPlaylistStatus,
                         onOpen = {
                             selectedPlaylistId = it.id
                             playlistReturnScreen = Screen.PLAYLISTS
@@ -673,10 +724,23 @@ fun OcarinaApp() {
                             onQueue = ::addToQueue,
                             onSave = { addToPlaylist = it })
                     }
-                    Screen.DOWNLOADS -> OcarinaOfflinePage(offlineSongs, importing,
+                    Screen.DOWNLOADS -> OcarinaOfflinePage(offlineSongs, importing || directDownloading,
                         onImport = { offlinePicker.launch(arrayOf("audio/*")) },
                         onPlay = { song -> playSong(song, offlineSongs) },
                         onRemove = { offlineStore.remove(it); offlineSongs = offlineStore.load() },
+                        onDownloadLink = { link ->
+                            coroutineScope.launch {
+                                directDownloading = true
+                                try {
+                                    val item = offlineStore.downloadAuthorizedAudio(link)
+                                    offlineSongs = offlineStore.load()
+                                    importMessage = "${item.title} adicionado à sua biblioteca offline."
+                                } catch (e: Exception) {
+                                    importMessage = e.localizedMessage ?: "Não foi possível baixar o arquivo."
+                                } finally { directDownloading = false }
+                            }
+                        },
+                        message = importMessage,
                     )
                 }
                 if (switchingTabs) Box(Modifier.matchParentSize().background(c.accent.copy(alpha = 0.035f)))

@@ -53,7 +53,7 @@ fun OcarinaPlaylistCover(list: OcarinaPlaylist, size: androidx.compose.ui.unit.D
 @Composable
 fun OcarinaPlaylistsPage(
     playlists: List<OcarinaPlaylist>, onCreate: () -> Unit,
-    onOpen: (OcarinaPlaylist) -> Unit,
+    onOpen: (OcarinaPlaylist) -> Unit, syncLabel: String = "",
 ) {
     val c = ocarinaColors
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp),
@@ -62,6 +62,7 @@ fun OcarinaPlaylistsPage(
             Text("Suas playlists", fontSize = 29.sp, fontWeight = FontWeight.SemiBold, color = c.text)
             Spacer(Modifier.height(5.dp))
             Text("Organize suas músicas e escolha a capa de cada lista.", color = c.muted, fontSize = 12.sp)
+            if (syncLabel.isNotBlank()) Text(syncLabel, color = c.accent, fontSize = 11.sp)
             Spacer(Modifier.height(15.dp))
             Button(onClick = onCreate, shape = RoundedCornerShape(15.dp)) {
                 Icon(painterResource(LucideR.drawable.lucide_ic_plus), null, Modifier.size(18.dp))
@@ -306,28 +307,107 @@ fun OcarinaCatalogDetailPage(
 
 @Composable
 fun OcarinaOfflinePage(tracks: List<Song>, busy: Boolean, onImport: () -> Unit,
-    onPlay: (Song) -> Unit, onRemove: (Song) -> Unit) {
+    onPlay: (Song) -> Unit, onRemove: (Song) -> Unit,
+    onDownloadLink: (String) -> Unit, message: String? = null) {
     val c = ocarinaColors
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(11.dp)) {
+    var search by remember { mutableStateOf("") }
+    var directLink by remember { mutableStateOf("") }
+    val filtered = remember(tracks, search) { tracks.filter {
+        it.title.contains(search, true) || it.artist.contains(search, true)
+    } }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(
+        start = 18.dp, end = 18.dp, top = 10.dp, bottom = 40.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item {
-            Text("Downloads", fontSize = 29.sp, fontWeight = FontWeight.SemiBold, color = c.text)
-            Text("Áudios seus, salvos neste celular para ouvir sem internet.",
-                fontSize = 12.sp, color = c.muted)
-            Spacer(Modifier.height(15.dp))
-            Button(onClick = onImport, enabled = !busy, shape = RoundedCornerShape(15.dp)) {
-                Icon(painterResource(LucideR.drawable.lucide_ic_music_2), null, Modifier.size(18.dp))
-                Spacer(Modifier.width(9.dp))
-                Text(if (busy) "Importando..." else "Importar arquivos de áudio")
-            }
-            Spacer(Modifier.height(12.dp))
-            Text("Não baixa faixas do YouTube automaticamente.", color = c.muted, fontSize = 11.sp)
+            Text("Sua música, offline", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = c.text)
+            Spacer(Modifier.height(5.dp))
+            Text("Organize os arquivos salvos neste aparelho.", color = c.muted, fontSize = 13.sp)
         }
-        if (tracks.isEmpty()) item { Text("Nenhum áudio salvo ainda.", color = c.muted) }
-        items(tracks, key = { it.videoId }) { song ->
+        item {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(25.dp))
+                .background(c.elevated).padding(19.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(52.dp).clip(RoundedCornerShape(17.dp))
+                        .background(c.softAccent), contentAlignment = Alignment.Center) {
+                        CIcon(LucideR.drawable.lucide_ic_headphones, "Biblioteca offline", Modifier.size(26.dp))
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Sempre com você", color = c.text,
+                            fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                        Text("${tracks.size} ${if (tracks.size == 1) "faixa salva" else "faixas salvas"}",
+                            color = c.muted, fontSize = 12.sp)
+                    }
+                }
+                Spacer(Modifier.height(17.dp))
+                Button(onClick = onImport, enabled = !busy,
+                    modifier = Modifier.fillMaxWidth().height(49.dp),
+                    shape = RoundedCornerShape(16.dp)) {
+                    CIcon(LucideR.drawable.lucide_ic_plus, "Importar", Modifier.size(19.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (busy) "Processando..." else "Adicionar arquivo do celular")
+                }
+            }
+        }
+        item {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp))
+                .background(c.surface).padding(17.dp)) {
+                Text("Baixar de um link direto", color = c.text,
+                    fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Spacer(Modifier.height(5.dp))
+                Text("Para áudios que você tenha autorização para salvar. Links de páginas do YouTube não são arquivos diretos.",
+                    color = c.muted, fontSize = 12.sp)
+                Spacer(Modifier.height(13.dp))
+                OutlinedTextField(value = directLink, onValueChange = { directLink = it.take(2000) },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    placeholder = { Text("https://exemplo.com/audio.flac", fontSize = 12.sp) },
+                    shape = RoundedCornerShape(15.dp))
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = { onDownloadLink(directLink.trim()) },
+                    enabled = !busy && directLink.startsWith("https://"),
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+                    Text(if (busy) "Baixando..." else "Salvar áudio autorizado")
+                }
+            }
+        }
+        if (!message.isNullOrBlank()) item {
+            Text(message, color = c.accent, fontSize = 12.sp)
+        }
+        item {
+            Text("Biblioteca neste aparelho", color = c.text,
+                fontWeight = FontWeight.SemiBold, fontSize = 19.sp)
+            if (tracks.isNotEmpty()) {
+                Spacer(Modifier.height(9.dp))
+                OutlinedTextField(value = search, onValueChange = { search = it },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    leadingIcon = { CIcon(LucideR.drawable.lucide_ic_search, "Buscar", Modifier.size(19.dp)) },
+                    placeholder = { Text("Buscar arquivos salvos", fontSize = 13.sp) },
+                    shape = RoundedCornerShape(15.dp))
+            }
+        }
+        if (tracks.isEmpty()) item {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+                .background(c.surface).padding(vertical = 37.dp, horizontal = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(72.dp).clip(CircleShape).background(c.softAccent),
+                    contentAlignment = Alignment.Center) {
+                    CIcon(LucideR.drawable.lucide_ic_music_2, "Nenhuma música", Modifier.size(32.dp))
+                }
+                Spacer(Modifier.height(13.dp))
+                Text("Ainda não tem nada por aqui", color = c.text,
+                    fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Spacer(Modifier.height(5.dp))
+                Text("Importe músicas do celular ou salve um arquivo permitido por link.",
+                    color = c.muted, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+        }
+        if (tracks.isNotEmpty() && filtered.isEmpty()) item {
+            Text("Nenhum arquivo corresponde à busca.", color = c.muted, fontSize = 13.sp)
+        }
+        items(filtered, key = { it.videoId }) { song ->
             OcarinaCollectionSong(song, onClick = { onPlay(song) }, trailing = {
                 IconButton(onClick = { onRemove(song) }) {
-                    CIcon(LucideR.drawable.lucide_ic_trash_2, "Apagar áudio local", Modifier.size(19.dp))
+                    CIcon(LucideR.drawable.lucide_ic_trash_2, "Remover arquivo", Modifier.size(19.dp))
                 }
             })
         }

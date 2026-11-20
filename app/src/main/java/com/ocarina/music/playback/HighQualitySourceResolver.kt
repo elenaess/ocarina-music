@@ -83,7 +83,7 @@ internal object HighQualitySourceResolver {
             }
             if (qualityLabels[song.videoId] == "FLAC?" &&
                 now - (previewAt[song.videoId] ?: 0L) < 90_000L) return "FLAC?"
-            qualityLabels.remove(song.videoId)
+            // Keep last-known status until the fresh network probe completes.
             previewAt.remove(song.videoId)
         }
         return try {
@@ -100,8 +100,13 @@ internal object HighQualitySourceResolver {
                         } else if (found?.codec == "FLAC") {
                             qualityLabels[song.videoId] = "FLAC?"
                             previewAt[song.videoId] = System.currentTimeMillis()
+                            OcarinaQualityHistory.recordCandidate(song.videoId)
                             "FLAC?"
-                        } else null
+                        } else {
+                            if (qualityLabels[song.videoId] in setOf("FLAC?", "HQ?"))
+                                qualityLabels.remove(song.videoId)
+                            null
+                        }
                     }
                 } finally {
                     badgeGate.release()
@@ -115,7 +120,7 @@ internal object HighQualitySourceResolver {
     /** If Media3 cannot decode or stream a FLAC, temporarily fall back to NewPipe. */
     fun markUnavailable(song: Song) {
         synchronized(lock) {
-            unavailableUntil[keyFor(song)] = System.currentTimeMillis() + 20 * 60_000L
+            unavailableUntil[keyFor(song)] = System.currentTimeMillis() + 5 * 60_000L
             cache.remove(keyFor(song))
             confirmedPlayback.remove(song.videoId)
             previewAt.remove(song.videoId)
@@ -222,7 +227,7 @@ internal object HighQualitySourceResolver {
     /** FLAC stream metadata from the STREAMINFO block (not an assumed 1411 kbps). */
     private fun flacHeader(url: String): Pair<Int, Int>? {
         val req = Request.Builder().url(url).get().header("Range", "bytes=0-41")
-            .header("User-Agent", "Ocarina/0.5.5 (Android)")
+            .header("User-Agent", "Mozilla/5.0 (Android) AppleWebKit/537.36 Chrome/126.0.0.0 Mobile Safari/537.36")
             .header("Accept-Encoding", "identity").build()
         return http.newCall(req).execute().use { response ->
             // An HTTP 200 full-body reply to a Range request is not verified seekable.

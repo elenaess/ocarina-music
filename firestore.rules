@@ -28,6 +28,30 @@ service cloud.firestore {
           && request.resource.data.artwork is string && request.resource.data.artwork.size() <= 800;
         allow delete: if owns(uid);
       }
+      match /playlists/{playlistId} {
+        allow read: if owns(uid);
+        allow create, update: if owns(uid)
+          && playlistId.matches('^[a-f0-9-]{36}$')
+          && request.resource.data.keys().hasOnly(['name', 'cover', 'songs', 'updatedAt'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 80
+          && request.resource.data.cover is string
+          && request.resource.data.cover.size() <= 800
+          && request.resource.data.songs is list
+          && request.resource.data.songs.size() <= 200;
+        allow delete: if owns(uid);
+      }
+      // Verified formats are per-account and bounded by the app's local cache.
+      match /quality_history/{videoId} {
+        allow read: if owns(uid);
+        allow create, update: if owns(uid)
+          && videoId.matches('^[a-zA-Z0-9_-]{11}$')
+          && request.resource.data.keys().hasOnly(['label', 'checkedAt'])
+          && request.resource.data.label in ['FLAC', 'HQ', 'CANDIDATE']
+          && request.resource.data.checkedAt == request.time;
+        allow delete: if owns(uid);
+      }
     }
     // The user explicitly publishes a playlist snapshot with Share.
     // No private favorites, email or profile docs are exposed by this collection.
