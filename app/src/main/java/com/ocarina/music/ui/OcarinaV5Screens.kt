@@ -21,6 +21,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -55,6 +56,7 @@ import com.ocarina.music.data.OcarinaAccount
 import com.ocarina.music.data.OcarinaPlaylist
 import com.ocarina.music.data.OcarinaPublicProfile
 import com.ocarina.music.data.Song
+import com.ocarina.music.playback.HighQualitySourceResolver
 
 @Composable
 private fun VI(@DrawableRes res: Int, label: String? = null,
@@ -309,9 +311,17 @@ private fun V5Cover(song: Song, onClick: () -> Unit, width: Dp = 150.dp) {
 
 @Composable
 private fun V5SongRow(song: Song, liked: Boolean, onPlay: () -> Unit,
-    onLike: () -> Unit, onQueue: () -> Unit, onPlaylist: () -> Unit, onShare: () -> Unit) {
+    onLike: () -> Unit, onQueue: () -> Unit, onPlaylist: () -> Unit, onShare: () -> Unit,
+    showQuality: Boolean = false, quality: String? = null,
+    onQualityVerified: ((String, String) -> Unit)? = null) {
     val c = ocarinaColors
     var menu by remember { mutableStateOf(false) }
+    LaunchedEffect(song.videoId, showQuality) {
+        if (showQuality && song.category == "music") {
+            val found = HighQualitySourceResolver.probeQualityBadge(song)
+            if (found != null) onQualityVerified?.invoke(song.videoId, found)
+        }
+    }
     Row(Modifier.fillMaxWidth().height(67.dp).clickable(onClick = onPlay),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(53.dp).clip(RoundedCornerShape(12.dp)).background(c.artworkSurface),
@@ -323,8 +333,19 @@ private fun V5SongRow(song: Song, liked: Boolean, onPlay: () -> Unit,
         Column(Modifier.weight(1f)) {
             Text(song.title, color = c.text, fontWeight = FontWeight.SemiBold,
                 fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(song.artist + if (song.category == "video") " • Vídeo" else "",
-                color = c.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(song.artist + if (song.category == "video") " • Vídeo" else "",
+                    modifier = Modifier.weight(1f), color = c.muted, fontSize = 12.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                quality?.let { badge ->
+                    Text("[$badge]",
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                            .background(c.softAccent).padding(horizontal = 6.dp, vertical = 2.dp),
+                        color = c.accent, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 1)
+                }
+            }
         }
         IconButton(onClick = onLike, modifier = Modifier.size(41.dp)) {
             OcarinaHeart(liked = liked, size = 20.dp)
@@ -441,6 +462,8 @@ fun OcarinaV5Search(listState: LazyListState, query: String, onQuery: (String) -
     var filter by remember { mutableStateOf("Tudo") }
     val likedIds = remember(favorites) { derivedStateOf { favorites.map { it.videoId }.toHashSet() } }
     val hasQuery = query.trim().isNotEmpty()
+    // Results keep their original order until quality is actually verified.
+    val qualityById = remember(query) { mutableStateMapOf<String, String>() }
     val filtered = remember(songs, filter) {
         when (filter) {
             "Música" -> songs.filter { it.category == "music" }
@@ -449,6 +472,23 @@ fun OcarinaV5Search(listState: LazyListState, query: String, onQuery: (String) -
             "Ao vivo" -> songs.filter { it.category == "live" }
             "Perfis" -> emptyList()
             else -> songs.sortedBy { when(it.category) { "music" -> 0; "video" -> 1; "podcast" -> 2; "live" -> 3; else -> 4 } }
+        }
+    }
+    // Check a small leading window even before scrolling; the resolver limits network concurrency.
+    LaunchedEffect(query, filtered) {
+        if (hasQuery) filtered.asSequence().filter { it.category == "music" }.take(12).forEach { song ->
+            launch {
+                val badge = HighQualitySourceResolver.probeQualityBadge(song)
+                if (badge != null) qualityById[song.videoId] = badge
+            }
+        }
+    }
+    // Stable sort: FLAC first, then verified 320+ kbps HQ, then unverified entries.
+    val ranked = filtered.sortedBy { song ->
+        when (qualityById[song.videoId]) {
+            "FLAC" -> 0
+            "HQ" -> 1
+            else -> 2
         }
     }
     LazyColumn(Modifier.fillMaxSize(), state = listState,
@@ -522,10 +562,13 @@ fun OcarinaV5Search(listState: LazyListState, query: String, onQuery: (String) -
                 else if (filtered.isEmpty()) item {
                     Text("Nenhum resultado de ${filter.lowercase()} encontrado.", color = c.muted)
                 }
-                else items(filtered, key = { "search:${it.videoId}" }, contentType = { "song" }) { song ->
+                else items(ranked, key = { "search:${it.videoId}" }, contentType = { "song" }) { song ->
                     V5SongRow(song, likedIds.value.contains(song.videoId),
                         onPlay = { onPlay(song) }, onLike = { onLike(song) },
-                        onQueue = { onQueue(song) }, onPlaylist = { onPlaylist(song) }, onShare = { onShare(song) })
+                        onQueue = { onQueue(song) }, onPlaylist = { onPlaylist(song) },
+                        onShare = { onShare(song) }, showQuality = song.category == "music",
+                        quality = qualityById[song.videoId],
+                        onQualityVerified = { id, badge -> qualityById[id] = badge })
                 }
             }
             if (filter == "Perfis" || filter == "Tudo") {

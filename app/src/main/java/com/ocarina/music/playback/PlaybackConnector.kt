@@ -126,6 +126,10 @@ class PlaybackConnector(context: Context) {
                         "audio/mp4a-latm" -> sourceCodec = "AAC"
                     }
                     if (format.sampleRate > 0) sourceSampleRateHz = format.sampleRate
+                    currentSong?.let { song ->
+                        HighQualitySourceResolver.notePlayableFormat(
+                            song.videoId, format.sampleMimeType, format.bitrate)
+                    }
                     break
                 }
             }

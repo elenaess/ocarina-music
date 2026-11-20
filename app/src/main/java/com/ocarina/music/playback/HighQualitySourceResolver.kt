@@ -5,6 +5,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Semaphore
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -34,6 +35,50 @@ internal object HighQualitySourceResolver {
     private data class Cached(val audio: ResolvedAudio?, val createdAt: Long)
     private val lock = Any()
     private val unavailableUntil = mutableMapOf<String, Long>()
+    // Only two simultaneous network checks, never one request per whole search result page.
+    private val badgeGate = Semaphore(2)
+    private val confirmedPlayback = object : LinkedHashMap<String, Pair<String, Long>>(40, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<String, Long>>) = size > 40
+    }
+
+    /** Store only a codec/bitrate Media3 actually identified during playback. */
+    fun notePlayableFormat(videoId: String, mime: String?, bitrateBitsPerSecond: Int) {
+        val tag = when {
+            mime == "audio/flac" || mime == "audio/x-flac" -> "FLAC"
+            bitrateBitsPerSecond >= 320_000 &&
+                mime in setOf("audio/mpeg", "audio/mp4a-latm", "audio/opus") -> "HQ"
+            else -> null
+        } ?: return
+        synchronized(lock) {
+            confirmedPlayback[videoId] = tag to System.currentTimeMillis()
+        }
+    }
+
+    /** Lightweight background probe for a visible search row; no fake quality badges. */
+    suspend fun probeQualityBadge(song: Song): String? {
+        if (song.category != "music" || song.videoId.startsWith("local:")) return null
+        synchronized(lock) {
+            confirmedPlayback[song.videoId]?.let { (tag, checkedAt) ->
+                if (System.currentTimeMillis() - checkedAt < 10 * 60_000L) return tag
+                confirmedPlayback.remove(song.videoId)
+            }
+        }
+        return try {
+            withTimeoutOrNull(5_500L) {
+                badgeGate.acquire()
+                try {
+                    val found = withContext(Dispatchers.IO) { findVerifiedFlac(song, refresh = false) }
+                    if (found?.codec == "FLAC") "FLAC" else null
+                } finally {
+                    badgeGate.release()
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     /** If Media3 cannot decode or stream a FLAC, temporarily fall back to NewPipe. */
     fun markUnavailable(song: Song) {
@@ -41,6 +86,7 @@ internal object HighQualitySourceResolver {
         synchronized(lock) {
             unavailableUntil[key] = System.currentTimeMillis() + 2 * 60_000L
             cache.remove(key)
+            confirmedPlayback.remove(song.videoId)
         }
     }
     private val cache = object : LinkedHashMap<String, Cached>(64, .75f, true) {
