@@ -1373,8 +1373,10 @@ private fun NativePlayerScreen(
                         "Repetição: ${when(playback.repeatMode) { 1 -> "faixa"; 2 -> "lista"; else -> "desligada" }}",
                         Modifier.size(23.dp), if (playback.repeatMode > 0) c.accent else c.muted)
                 }
-                Text(if (playback.sourceBitrateKbps > 0) "~${playback.sourceBitrateKbps} kbps"
-                    else "Áudio original", color = c.muted, fontSize = 11.sp)
+                TextButton(onClick = { playback.toggleAudioQuality() }) {
+                    Text(playback.qualityDescription, color = c.muted, fontSize = 11.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
                 IconButton(onClick = onQueue) {
                     LIcon(LucideR.drawable.lucide_ic_list_music, "Abrir fila de escuta", Modifier.size(23.dp), c.accent)
                 }

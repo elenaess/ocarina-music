@@ -18,7 +18,14 @@ import java.util.concurrent.TimeUnit
  * Audio is streamed as encoded by its source, never upscaled or transcoded.
  * bitrateKbps is an estimate reported by NewPipe, NOT a guarantee of perceived quality.
  */
-data class ResolvedAudio(val url: String, val bitrateKbps: Int)
+data class ResolvedAudio(
+    val url: String,
+    val bitrateKbps: Int,
+    val codec: String = "",
+    val provider: String = "YouTube",
+    val sampleRateHz: Int = 0,
+    val bitDepth: Int = 0,
+)
 
 /** Public, unofficial catalog adapter. Signed URLs have short lifetimes. */
 object AudioSourceResolver {

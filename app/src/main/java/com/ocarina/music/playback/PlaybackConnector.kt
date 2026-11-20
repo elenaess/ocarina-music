@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -34,6 +35,17 @@ import kotlinx.coroutines.launch
 /** Estado nativo do player consumido pelas telas Compose. */
 class PlaybackConnector(context: Context) {
     private val appContext = context.applicationContext
+    var preferFlac by mutableStateOf(appContext.getSharedPreferences(
+        "ocarina_preferences", Context.MODE_PRIVATE).getBoolean("prefer_lossless_v055", true))
+        private set
+
+    fun toggleAudioQuality() {
+        preferFlac = !preferFlac
+        appContext.getSharedPreferences("ocarina_preferences", Context.MODE_PRIVATE)
+            .edit().putBoolean("prefer_lossless_v055", preferFlac).apply()
+        currentSong?.takeUnless { it.videoId.startsWith("local:") }
+            ?.let { play(it, refresh = true) }
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val connected = CompletableDeferred<MediaController>()
     private var resolving: Job? = null
@@ -68,6 +80,23 @@ class PlaybackConnector(context: Context) {
         private set
     var sourceBitrateKbps by mutableLongStateOf(0L)
         private set
+    var sourceCodec by mutableStateOf("")
+        private set
+    var sourceSampleRateHz by mutableIntStateOf(0)
+        private set
+    var sourceBitDepth by mutableIntStateOf(0)
+        private set
+    var sourceProvider by mutableStateOf("")
+        private set
+    val qualityDescription: String
+        get() = when {
+            sourceCodec == "FLAC" && sourceBitDepth > 0 && sourceSampleRateHz > 0 ->
+                "FLAC • ${sourceBitDepth}-bit/${sourceSampleRateHz / 1000.0} kHz"
+            sourceCodec == "FLAC" -> "FLAC • Lossless"
+            sourceCodec == "MP3" && sourceBitrateKbps >= 320L -> "MP3 • ${sourceBitrateKbps} kbps"
+            sourceBitrateKbps > 0 -> "~${sourceBitrateKbps} kbps"
+            else -> if (preferFlac) "HQ • Auto" else "Padrão"
+        }
 
     private val token = SessionToken(appContext, ComponentName(appContext, OcarinaPlaybackService::class.java))
     private val future = MediaController.Builder(appContext, token).buildAsync()
@@ -83,14 +112,34 @@ class PlaybackConnector(context: Context) {
                 if (endedSong != null) scope.launch { onTrackEnded?.invoke(endedSong) }
             }
         }
+        override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            for (group in tracks.groups) {
+                if (group.type != C.TRACK_TYPE_AUDIO) continue
+                for (i in 0 until group.length) {
+                    if (!group.isTrackSelected(i)) continue
+                    val format = group.getTrackFormat(i)
+                    if (format.bitrate > 0) sourceBitrateKbps = format.bitrate.toLong() / 1000
+                    when (format.sampleMimeType) {
+                        "audio/flac", "audio/x-flac" -> sourceCodec = "FLAC"
+                        "audio/mpeg" -> sourceCodec = "MP3"
+                        "audio/opus" -> sourceCodec = "OPUS"
+                        "audio/mp4a-latm" -> sourceCodec = "AAC"
+                    }
+                    if (format.sampleRate > 0) sourceSampleRateHz = format.sampleRate
+                    break
+                }
+            }
+        }
         override fun onPlayerError(error: PlaybackException) {
             Log.e("OcarinaPlayback", "Falha Media3 na faixa ${currentSong?.videoId}", error)
             if (resolvingAudio || controller?.currentMediaItem?.mediaId != currentSong?.videoId) return
+            if (sourceCodec == "FLAC") currentSong?.let(HighQualitySourceResolver::markUnavailable)
             // Expiring temporary URLs occasionally return 403. Retry the current track once.
             if (!retryingSource && currentSong != null &&
                 controller?.currentMediaItem?.mediaId == currentSong?.videoId &&
                 (error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
-                    error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED)) {
+                    error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                    sourceCodec == "FLAC")) {
                 retryingSource = true
                 // Schedule outside Media3's callback, avoiding reentrant player mutation.
                 val failed = currentSong!!
@@ -167,6 +216,10 @@ class PlaybackConnector(context: Context) {
         controller?.clearMediaItems()
         currentSong = song
         sourceBitrateKbps = 0L
+        sourceCodec = ""
+        sourceSampleRateHz = 0
+        sourceBitDepth = 0
+        sourceProvider = ""
         error = null
         resolving = scope.launch {
             try {
@@ -174,10 +227,14 @@ class PlaybackConnector(context: Context) {
                 val source = if (song.videoId.startsWith("local:")) {
                     if (localUri == null) throw java.io.IOException("Arquivo local não encontrado.")
                     ResolvedAudio(localUri.toString(), 0)
-                } else AudioSourceResolver.resolve(song.videoId, refresh = refresh)
+                } else HighQualitySourceResolver.resolve(song, preferFlac = preferFlac, refresh = refresh)
                 val c = connected.await()
                 if (thisRequest != playSerial) return@launch
                 sourceBitrateKbps = source.bitrateKbps.toLong()
+                sourceCodec = source.codec
+                sourceSampleRateHz = source.sampleRateHz
+                sourceBitDepth = source.bitDepth
+                sourceProvider = source.provider
                 val item = MediaItem.Builder()
                     .setMediaId(song.videoId)
                     .setUri(source.url)
@@ -215,6 +272,10 @@ class PlaybackConnector(context: Context) {
         positionMs = 0L
         durationMs = 0L
         sourceBitrateKbps = 0L
+        sourceCodec = ""
+        sourceSampleRateHz = 0
+        sourceBitDepth = 0
+        sourceProvider = ""
         error = null
         controller?.stop()
         controller?.clearMediaItems()
