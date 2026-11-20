@@ -1,29 +1,47 @@
-name: Ocarina Music APK
+name: Ocarina APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, 'build/**']
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      OCARINA_SIGNING_KEYSTORE_B64: ${{ secrets.OCARINA_SIGNING_KEYSTORE_B64 }}
+      OCARINA_SIGNING_STORE_PASSWORD: ${{ secrets.OCARINA_SIGNING_STORE_PASSWORD }}
+      OCARINA_SIGNING_KEY_PASSWORD: ${{ secrets.OCARINA_SIGNING_KEY_PASSWORD }}
+      OCARINA_SIGNING_KEY_ALIAS: ocarina
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+      # O pacote legado 'tools' foi removido do repositório do Android SDK.
+      # A action v3 pede 'tools platform-tools' por padrão e falha no sdkmanager.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Install Android SDK 35
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Install Android SDK 36
+        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+      - name: Restore stable signing key for Google login
+        shell: bash
+        run: |
+          if [ -n "$OCARINA_SIGNING_KEYSTORE_B64" ]; then
+            printf '%s' "$OCARINA_SIGNING_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/ocarina-preview.jks"
+            echo "OCARINA_SIGNING_STORE_FILE=$RUNNER_TEMP/ocarina-preview.jks" >> "$GITHUB_ENV"
+          else
+            echo "Signing secrets not set; Google login requires registering the SHA-1 of the APK's certificate."
+          fi
       - name: Build debug APK
-        run: gradle --no-daemon :app:assembleDebug
+        run: gradle --no-daemon :app:assembleDebug --stacktrace --warning-mode=all
       - uses: actions/upload-artifact@v4
         with:
-          name: ocarina-music-v0.1-debug
+          name: ocarina-v0.4.1-google-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
